@@ -1,0 +1,14 @@
+# IntelliJ
+.idea/
+*.iml
+
+# Gradle
+.gradle/
+build/
+
+# Environment variables
+.env
+
+# OS
+.DS_Store
+Thumbs.db
