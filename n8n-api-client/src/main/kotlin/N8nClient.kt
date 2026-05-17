@@ -7,8 +7,30 @@ import io.ktor.client.plugins.logging.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
+import kotlinx.serialization.Serializable
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+
+@Serializable
+private data class CredentialCreateRequest(
+    val name: String,
+    val type: String,
+    val data: JsonObject
+)
+
+@Serializable
+private data class CredentialResponse(
+    val id: String,
+    val name: String
+)
+
+@Serializable
+private data class CredentialListResponse(
+    val data: List<CredentialResponse>
+)
 
 class N8nClient(
     private val baseUrl: String,
@@ -87,6 +109,33 @@ class N8nClient(
     suspend fun executeWorkflow(id: String): Execution {
         val response: HttpResponse = client.post("${apiBase}workflows/$id/execute")
         return handleResponse(response)
+    }
+
+    // --- Credentials ---
+
+    suspend fun findOrCreateTelegramCredential(botToken: String): String {
+        val credentialName = "Telegram Bot (Auto)"
+        val listResponse: HttpResponse = client.get("${apiBase}credentials")
+        if (listResponse.status.isSuccess()) {
+            val existing = handleResponse<CredentialListResponse>(listResponse)
+                .data.find { it.name == credentialName }
+            if (existing != null) {
+                println("Vorhandenes Credential gefunden: ${existing.id}")
+                return existing.id
+            }
+        }
+        val request = CredentialCreateRequest(
+            name = credentialName,
+            type = "telegramApi",
+            data = buildJsonObject {
+                put("accessToken", JsonPrimitive(botToken))
+            }
+        )
+        val response: HttpResponse = client.post("${apiBase}credentials") {
+            setBody(request)
+        }
+        val credential = handleResponse<CredentialResponse>(response)
+        return credential.id
     }
 
     // --- Executions ---

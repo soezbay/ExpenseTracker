@@ -1,0 +1,260 @@
+[
+  {
+    "id": "deepseek-r1:latest",
+    "name": "deepseek-r1:latest",
+    "object": "model",
+    "created": 1779034979,
+    "owned_by": "ollama",
+    "ollama": {
+      "name": "deepseek-r1:latest",
+      "model": "deepseek-r1:latest",
+      "modified_at": "2026-05-17T16:15:57.957761544Z",
+      "size": 5225376047,
+      "digest": "6995872bfe4c521a67b32da386cd21d5c6e819b6e0d62f79f64ec83be99f5763",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "qwen3",
+        "families": [
+          "qwen3"
+        ],
+        "parameter_size": "8.2B",
+        "quantization_level": "Q4_K_M"
+      },
+      "connection_type": "local",
+      "urls": [
+        0
+      ]
+    },
+    "loaded": false,
+    "connection_type": "local",
+    "tags": [],
+    "is_active": true
+  },
+  {
+    "id": "gemma4:latest",
+    "name": "gemma4:latest",
+    "object": "model",
+    "created": 1779034979,
+    "owned_by": "ollama",
+    "ollama": {
+      "name": "gemma4:latest",
+      "model": "gemma4:latest",
+      "modified_at": "2026-05-17T16:14:55.006347806Z",
+      "size": 9608350718,
+      "digest": "c6eb396dbd5992bbe3f5cdb947e8bbc0ee413d7c17e2beaae69f5d569cf982eb",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "gemma4",
+        "families": [
+          "gemma4"
+        ],
+        "parameter_size": "8.0B",
+        "quantization_level": "Q4_K_M"
+      },
+      "connection_type": "local",
+      "urls": [
+        0
+      ]
+    },
+    "loaded": false,
+    "connection_type": "local",
+    "tags": [],
+    "is_active": true
+  },
+  {
+    "id": "nomic-embed-text:latest",
+    "name": "nomic-embed-text:latest",
+    "object": "model",
+    "created": 1779034979,
+    "owned_by": "ollama",
+    "ollama": {
+      "name": "nomic-embed-text:latest",
+      "model": "nomic-embed-text:latest",
+      "modified_at": "2026-05-17T16:14:15.226719554Z",
+      "size": 274302450,
+      "digest": "0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "nomic-bert",
+        "families": [
+          "nomic-bert"
+        ],
+        "parameter_size": "137M",
+        "quantization_level": "F16"
+      },
+      "connection_type": "local",
+      "urls": [
+        0
+      ]
+    },
+    "loaded": false,
+    "connection_type": "local",
+    "tags": [],
+    "is_active": true
+  },
+  {
+    "id": "deepseek-ocr:latest",
+    "name": "deepseek-ocr:latest",
+    "object": "model",
+    "created": 1779034979,
+    "owned_by": "ollama",
+    "ollama": {
+      "name": "deepseek-ocr:latest",
+      "model": "deepseek-ocr:latest",
+      "modified_at": "2026-05-17T16:07:41.422476167Z",
+      "size": 6687240356,
+      "digest": "0e7b018b8a22373167ee79c9a852821235488cbd2a2a5a93495558627423278c",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "deepseekocr",
+        "families": [
+          "deepseekocr"
+        ],
+        "parameter_size": "3.3B",
+        "quantization_level": "F16"
+      },
+      "connection_type": "local",
+      "urls": [
+        0
+      ]
+    },
+    "loaded": false,
+    "connection_type": "local",
+    "tags": [],
+    "is_active": true
+  },
+  {
+    "id": "kimi-k2.5:cloud",
+    "name": "kimi-k2.5:cloud",
+    "object": "model",
+    "created": 1779034979,
+    "owned_by": "ollama",
+    "ollama": {
+      "name": "kimi-k2.5:cloud",
+      "model": "kimi-k2.5:cloud",
+      "remote_model": "kimi-k2.5",
+      "remote_host": "https://ollama.com:443",
+      "modified_at": "2026-05-17T16:01:24.822295127Z",
+      "size": 340,
+      "digest": "6d1c3246c6080b61c87b543323760b8f36cb68cf4473080b9429d09e2a73ddb7",
+      "details": {
+        "parent_model": "",
+        "format": "",
+        "family": "",
+        "families": null,
+        "parameter_size": "",
+        "quantization_level": ""
+      },
+      "connection_type": "local",
+      "urls": [
+        0
+      ]
+    },
+    "loaded": false,
+    "connection_type": "local",
+    "tags": [],
+    "is_active": true
+  },
+  {
+    "id": "moondream:latest",
+    "name": "moondream:latest",
+    "object": "model",
+    "created": 1779034979,
+    "owned_by": "ollama",
+    "ollama": {
+      "name": "moondream:latest",
+      "model": "moondream:latest",
+      "modified_at": "2026-05-16T15:42:02.301495498Z",
+      "size": 1738451197,
+      "digest": "55fc3abd386771e5b5d1bbcc732f3c3f4df6e9f9f08f1131f9cc27ba2d1eec5b",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "phi2",
+        "families": [
+          "phi2",
+          "clip"
+        ],
+        "parameter_size": "1B",
+        "quantization_level": "Q4_0"
+      },
+      "connection_type": "local",
+      "urls": [
+        0
+      ]
+    },
+    "loaded": false,
+    "connection_type": "local",
+    "tags": [],
+    "is_active": true
+  },
+  {
+    "id": "qwen2.5:latest",
+    "name": "qwen2.5:latest",
+    "object": "model",
+    "created": 1779034979,
+    "owned_by": "ollama",
+    "ollama": {
+      "name": "qwen2.5:latest",
+      "model": "qwen2.5:latest",
+      "modified_at": "2026-05-15T22:40:23.9837967Z",
+      "size": 4683087332,
+      "digest": "845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "qwen2",
+        "families": [
+          "qwen2"
+        ],
+        "parameter_size": "7.6B",
+        "quantization_level": "Q4_K_M"
+      },
+      "connection_type": "local",
+      "urls": [
+        0
+      ]
+    },
+    "loaded": false,
+    "connection_type": "local",
+    "tags": [],
+    "is_active": true
+  },
+  {
+    "id": "llama3.2-vision:latest",
+    "name": "llama3.2-vision:latest",
+    "object": "model",
+    "created": 1779034979,
+    "owned_by": "ollama",
+    "ollama": {
+      "name": "llama3.2-vision:latest",
+      "model": "llama3.2-vision:latest",
+      "modified_at": "2026-01-17T22:11:53.354935432Z",
+      "size": 7816589186,
+      "digest": "6f2f9757ae97e8a3f8ea33d6adb2b11d93d9a35bef277cd2c0b1b5af8e8d0b1e",
+      "details": {
+        "parent_model": "",
+        "format": "gguf",
+        "family": "mllama",
+        "families": [
+          "mllama"
+        ],
+        "parameter_size": "10.7B",
+        "quantization_level": "Q4_K_M"
+      },
+      "connection_type": "local",
+      "urls": [
+        0
+      ],
+      "expires_at": 1779035220
+    },
+    "loaded": true,
+    "connection_type": "local",
+    "tags": [],
+    "is_active": true
+  }
+]
