@@ -72,17 +72,18 @@ fun main() {
 }
 
 fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, model: String, botToken: String): WorkflowCreateRequest {
-    val triggerId     = uuidShort()
-    val ifPhotoId     = uuidShort()
-    val getFileId     = uuidShort()
-    val downloadId    = uuidShort()
-    val toBase64Id    = uuidShort()
-    val ollamaId      = uuidShort()
-    val ifReceiptId   = uuidShort()
-    val noReceiptId   = uuidShort()
-    val yesReceiptId  = uuidShort()
-    val noPhotoId     = uuidShort()
-    val timeoutId     = uuidShort()
+    val triggerId       = uuidShort()
+    val ifPhotoId       = uuidShort()
+    val validatingId    = uuidShort()
+    val getFileId       = uuidShort()
+    val downloadId      = uuidShort()
+    val toBase64Id      = uuidShort()
+    val ollamaId        = uuidShort()
+    val ifReceiptId     = uuidShort()
+    val noReceiptId     = uuidShort()
+    val yesReceiptId    = uuidShort()
+    val noPhotoId       = uuidShort()
+    val timeoutId       = uuidShort()
 
     // Node 1: Telegram Trigger
     val triggerNode = buildJsonObject {
@@ -123,7 +124,30 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         })
     }
 
-    // Node 3: Kein Bild → Telegram Antwort (false branch)
+    // Node 3: Validating photo (true branch nach Foto vorhanden?)
+    val validatingNode = buildJsonObject {
+        put("id", validatingId)
+        put("name", "Antwort: Validating photo")
+        put("type", "n8n-nodes-base.telegram")
+        put("typeVersion", 1.1)
+        put("position", buildJsonArray { add(750); add(300) })
+        put("parameters", buildJsonObject {
+            put("operation", "sendMessage")
+            put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
+            put("text", "Validating photo.. please wait.")
+            put("additionalFields", buildJsonObject {
+                put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+            })
+        })
+        put("credentials", buildJsonObject {
+            put("telegramApi", buildJsonObject {
+                put("id", credentialId)
+                put("name", "Telegram Bot")
+            })
+        })
+    }
+
+    // Node 4: Kein Bild → Telegram Antwort (false branch)
     val noPhotoNode = buildJsonObject {
         put("id", noPhotoId)
         put("name", "Antwort: Kein Bild")
@@ -134,7 +158,9 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             put("operation", "sendMessage")
             put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
             put("text", "Bitte sende ein Bild von deinem Kassenbon oder deiner Rechnung.")
-            put("additionalOptions", buildJsonObject {})
+            put("additionalFields", buildJsonObject {
+                put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+            })
         })
         put("credentials", buildJsonObject {
             put("telegramApi", buildJsonObject {
@@ -231,7 +257,9 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             put("operation", "sendMessage")
             put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
             put("text", "Die Verarbeitung hat zu lange gedauert. Bitte versuche es erneut.")
-            put("additionalOptions", buildJsonObject {})
+            put("additionalFields", buildJsonObject {
+                put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+            })
         })
         put("credentials", buildJsonObject {
             put("telegramApi", buildJsonObject {
@@ -272,7 +300,9 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             put("operation", "sendMessage")
             put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
             put("text", "Als Kassenbon/Rechnung validiert")
-            put("additionalOptions", buildJsonObject {})
+            put("additionalFields", buildJsonObject {
+                put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+            })
         })
         put("credentials", buildJsonObject {
             put("telegramApi", buildJsonObject {
@@ -293,7 +323,9 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             put("operation", "sendMessage")
             put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
             put("text", "Das ist kein Kassenbon oder Rechnung. Bitte sende ein gültiges Bild.")
-            put("additionalOptions", buildJsonObject {})
+            put("additionalFields", buildJsonObject {
+                put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+            })
         })
         put("credentials", buildJsonObject {
             put("telegramApi", buildJsonObject {
@@ -313,13 +345,20 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         })
         put("Foto vorhanden?", buildJsonObject {
             put("main", buildJsonArray {
-                // index 0 = true → Foto vorhanden → getFile
+                // index 0 = true → Foto vorhanden → validating photo
                 add(buildJsonArray {
-                    add(buildJsonObject { put("node", "Telegram getFile"); put("type", "main"); put("index", 0) })
+                    add(buildJsonObject { put("node", "Antwort: Validating photo"); put("type", "main"); put("index", 0) })
                 })
                 // index 1 = false → kein Foto
                 add(buildJsonArray {
                     add(buildJsonObject { put("node", "Antwort: Kein Bild"); put("type", "main"); put("index", 0) })
+                })
+            })
+        })
+        put("Antwort: Validating photo", buildJsonObject {
+            put("main", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Telegram getFile"); put("type", "main"); put("index", 0) })
                 })
             })
         })
@@ -375,6 +414,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         nodes = listOf(
             triggerNode,
             ifPhotoNode,
+            validatingNode,
             noPhotoNode,
             getFileNode,
             downloadNode,
@@ -386,7 +426,9 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             noReceiptAnswer
         ),
         connections = connections,
-        settings = buildJsonObject {}
+        settings = buildJsonObject {
+            put("executionOrder", "v1")
+        }
     )
 }
 
