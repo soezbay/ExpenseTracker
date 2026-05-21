@@ -1,5 +1,14 @@
 # Sprint Reviews
 
+Sprint presentation content (10 min, live demo encouraged):
+
+Sprint goal recap — What did you set out to build?
+Demo / progress — Show what works. Live demos strongly preferred over slides.
+Technical decisions — What did you choose and why? What trade-offs did you make?
+Learnings — What surprised you? What was harder/easier than expected?
+Next sprint plan — What will you tackle next?
+Open questions — Where do you need help or feedback?
+
 ## Sprint 1
 
 **Ziel:** Automatisch deployten n8n-Workflow bauen, der Telegram-Fotos per Ollama als Kassenbon klassifiziert und dem Nutzer antwortet.
