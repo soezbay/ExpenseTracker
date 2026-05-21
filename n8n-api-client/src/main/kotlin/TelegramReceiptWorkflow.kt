@@ -37,7 +37,7 @@ fun main() {
             val credentialId = client.findOrCreateTelegramCredential(botToken)
             println("✅ Credential erstellt: $credentialId")
 
-            val workflowName = "Kassenbon Validierung"
+            val workflowName = "Expense Tracker"
             println("Prüfe auf vorhandenen Workflow '$workflowName'...")
             val existing = client.listWorkflows().find { it.name == workflowName }
             if (existing != null) {
@@ -299,7 +299,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         put("parameters", buildJsonObject {
             put("operation", "sendMessage")
             put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
-            put("text", "Als Kassenbon/Rechnung validiert")
+            put("text", "Validation successful, extracting receipt/invoice data...")
             put("additionalFields", buildJsonObject {
                 put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
             })
@@ -322,7 +322,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         put("parameters", buildJsonObject {
             put("operation", "sendMessage")
             put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
-            put("text", "Das ist kein Kassenbon oder Rechnung. Bitte sende ein gültiges Bild.")
+            put("text", "This is not a receipt or invoice. Please send a valid image.")
             put("additionalFields", buildJsonObject {
                 put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
             })
@@ -410,7 +410,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
     }
 
     return WorkflowCreateRequest(
-        name = "Kassenbon Validierung",
+        name = "Expense Tracker",
         nodes = listOf(
             triggerNode,
             ifPhotoNode,
