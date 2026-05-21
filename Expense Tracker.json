@@ -1,0 +1,382 @@
+{
+  "name": "Expense Tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "be925045",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        256,
+        448
+      ],
+      "webhookId": "be925045",
+      "credentials": {
+        "telegramApi": {
+          "id": "J0EocZdbvmM6esI6",
+          "name": "Telegram Bot (Auto)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.message.photo ? $json.message.photo.length.toString() : '' }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "73292a73",
+      "name": "Foto vorhanden?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        480,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "Validating photo.. please wait.",
+        "additionalFields": {
+          "reply_to_message_id": "={{ parseInt($('Telegram Trigger').item.json.message.message_id) }}"
+        }
+      },
+      "id": "388e272b",
+      "name": "Antwort: Validating photo",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        704,
+        352
+      ],
+      "webhookId": "b034d0b0-5c45-4a6e-aba9-500dbc3e1288",
+      "credentials": {
+        "telegramApi": {
+          "id": "J0EocZdbvmM6esI6",
+          "name": "Telegram Bot (Auto)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "Bitte sende ein Bild von deinem Kassenbon oder deiner Rechnung.",
+        "additionalFields": {
+          "reply_to_message_id": "={{ parseInt($('Telegram Trigger').item.json.message.message_id) }}"
+        }
+      },
+      "id": "9e44bb02",
+      "name": "Antwort: Kein Bild",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        704,
+        544
+      ],
+      "webhookId": "cee8da05-4e13-4b58-be2b-75330f3758e4",
+      "credentials": {
+        "telegramApi": {
+          "id": "J0EocZdbvmM6esI6",
+          "name": "Telegram Bot (Auto)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/getFile",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "file_id",
+              "value": "={{ $('Telegram Trigger').item.json.message.photo[$('Telegram Trigger').item.json.message.photo.length - 1].file_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "311acac8",
+      "name": "Telegram getFile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        928,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ `https://api.telegram.org/file/bot<TELEGRAM_BOT_TOKEN>/` + $json.result.file_path }}",
+        "options": {}
+      },
+      "id": "9875b200",
+      "name": "Bild herunterladen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1152,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst item = items[0];\nconst binaryKey = Object.keys(item.binary)[0];\nconst binaryData = item.binary[binaryKey];\nconst buffer = await this.helpers.getBinaryDataBuffer(0, binaryKey);\nconst base64 = buffer.toString('base64');\nreturn [{ json: { imageBase64: base64 } }];"
+      },
+      "id": "d8a30fd3",
+      "name": "Zu Base64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1376,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ollama:11434/api/generate",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: \"gemma4:e2b\", prompt: \"Is this image a receipt or invoice? Reply with only true or false.\", stream: false, images: [$json.imageBase64] }) }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "0a225f08",
+      "name": "Ollama Validierung",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1600,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "Die Verarbeitung hat zu lange gedauert. Bitte versuche es erneut.",
+        "additionalFields": {
+          "reply_to_message_id": "={{ parseInt($('Telegram Trigger').item.json.message.message_id) }}"
+        }
+      },
+      "id": "45c35eeb",
+      "name": "Antwort: Timeout",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1824,
+        448
+      ],
+      "webhookId": "e55459ac-23d0-41f9-b6b7-ec9a2a6a8a6f",
+      "credentials": {
+        "telegramApi": {
+          "id": "J0EocZdbvmM6esI6",
+          "name": "Telegram Bot (Auto)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.response.toLowerCase().trim() }}",
+              "operation": "contains",
+              "value2": "true"
+            }
+          ]
+        }
+      },
+      "id": "3c8e6e36",
+      "name": "Ist Kassenbon?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1824,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "Validation successful, extracting receipt/invoice data...",
+        "additionalFields": {
+          "reply_to_message_id": "={{ parseInt($('Telegram Trigger').item.json.message.message_id) }}"
+        }
+      },
+      "id": "543d9c36",
+      "name": "Antwort: Validierung OK",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        2048,
+        160
+      ],
+      "webhookId": "f3ab2b0f-ce8e-4b47-a079-4a1997426212",
+      "credentials": {
+        "telegramApi": {
+          "id": "J0EocZdbvmM6esI6",
+          "name": "Telegram Bot (Auto)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "This is not a receipt or invoice. Please send a valid image.",
+        "additionalFields": {
+          "reply_to_message_id": "={{ parseInt($('Telegram Trigger').item.json.message.message_id) }}"
+        }
+      },
+      "id": "cd0fb4ea",
+      "name": "Antwort: Kein Kassenbon",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        2048,
+        352
+      ],
+      "webhookId": "aa719d0b-920d-4ea3-bec8-b8d517fbe2ee",
+      "credentials": {
+        "telegramApi": {
+          "id": "J0EocZdbvmM6esI6",
+          "name": "Telegram Bot (Auto)"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Foto vorhanden?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Foto vorhanden?": {
+      "main": [
+        [
+          {
+            "node": "Antwort: Validating photo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Antwort: Kein Bild",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Antwort: Validating photo": {
+      "main": [
+        [
+          {
+            "node": "Telegram getFile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram getFile": {
+      "main": [
+        [
+          {
+            "node": "Bild herunterladen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bild herunterladen": {
+      "main": [
+        [
+          {
+            "node": "Zu Base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zu Base64": {
+      "main": [
+        [
+          {
+            "node": "Ollama Validierung",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Validierung": {
+      "main": [
+        [
+          {
+            "node": "Ist Kassenbon?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Antwort: Timeout",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ist Kassenbon?": {
+      "main": [
+        [
+          {
+            "node": "Antwort: Validierung OK",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Antwort: Kein Kassenbon",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "c7b91425-c4b5-44cd-9566-3e7c6ca73ffb",
+  "meta": {
+    "instanceId": "d42dc6f4d93178bfcccd6a7e4017bb2f34458d8325388a2b4657d55fb4ea5d81"
+  },
+  "id": "dU08o0PDKdx9mjp4",
+  "tags": []
+}
