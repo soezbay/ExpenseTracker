@@ -79,13 +79,12 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
     val getFileId       = uuidShort()
     val downloadId      = uuidShort()
     val toBase64Id      = uuidShort()
-    val ollamaId        = uuidShort()
     val ifReceiptId     = uuidShort()
     val noReceiptId     = uuidShort()
-    val yesReceiptId    = uuidShort()
     val noPhotoId       = uuidShort()
     val timeoutId       = uuidShort()
     val ocrId           = uuidShort()
+    val formatId        = uuidShort()
     val ocrResultId     = uuidShort()
 
     // Node 1: Telegram Trigger
@@ -231,26 +230,6 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         })
     }
 
-    // Node 5: Ollama – Bild mit base64 senden (liest Binary direkt)
-    val ollamaNode = buildJsonObject {
-        put("id", ollamaId)
-        put("name", "Ollama Validierung")
-        put("type", "n8n-nodes-base.httpRequest")
-        put("typeVersion", 4.2)
-        put("position", buildJsonArray { add(1250); add(300) })
-        put("parameters", buildJsonObject {
-            put("method", "POST")
-            put("url", ollamaUrl)
-            put("sendBody", true)
-            put("specifyBody", "json")
-            put("jsonBody", "={{ JSON.stringify({ model: \"$model\", prompt: \"Is this image a receipt or invoice? Reply with only true or false.\", stream: false, images: [\$json.imageBase64] }) }}")
-            put("options", buildJsonObject {
-                put("timeout", 300000)
-            })
-            put("onError", "continueErrorOutput")
-        })
-    }
-
     // Node 5b: Timeout-Fehler → Telegram Benachrichtigung
     val timeoutNode = buildJsonObject {
         put("id", timeoutId)
@@ -275,63 +254,92 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         })
     }
 
+    // Node 5c: Code – OCR JSON zu lesbarem Text formatieren
+    val formatNode = buildJsonObject {
+        put("id", formatId)
+        put("name", "Format OCR")
+        put("type", "n8n-nodes-base.code")
+        put("typeVersion", 2)
+        put("position", buildJsonArray { add(1750); add(150) })
+        put("parameters", buildJsonObject {
+            put("language", "javaScript")
+            put("jsCode",
+                "const raw = \$input.first().json.response;\n" +
+                "let formatted;\n" +
+                "try {\n" +
+                "  let jsonStr = raw.trim();\n" +
+                "  if (jsonStr.startsWith('```')) {\n" +
+                "    jsonStr = jsonStr.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```\\$/, '');\n" +
+                "  }\n" +
+                "  const data = JSON.parse(jsonStr);\n" +
+                "  const lines = [];\n" +
+                "  if (data.sender?.name) lines.push(data.sender.name);\n" +
+                "  if (data.sender?.address) lines.push(data.sender.address);\n" +
+                "  const date = data.invoice_date || data.invoicedate;\n" +
+                "  if (date) lines.push('Datum: ' + date);\n" +
+                "  const nr = data.invoice_number || data.invoicenumber;\n" +
+                "  if (nr) lines.push('Beleg-Nr: ' + nr);\n" +
+                "  lines.push('');\n" +
+                "  lines.push('--- Artikel ---');\n" +
+                "  const allItems = data.line_items || data.lineitems || [];\n" +
+                "  const items = allItems.filter(i => (i.unit_price_net || i.unitpricenet) !== null && (i.unit_price_net || i.unitpricenet) !== undefined);\n" +
+                "  for (const item of items) {\n" +
+                "    const qty = item.quantity ? item.quantity + 'x ' : '';\n" +
+                "    const amt = (item.amount_net ?? item.amountnet);\n" +
+                "    const amtStr = amt !== null && amt !== undefined ? ' ' + amt.toFixed(2) + ' ' + (data.currency || 'EUR') : '';\n" +
+                "    lines.push(qty + item.description + amtStr);\n" +
+                "  }\n" +
+                "  lines.push('');\n" +
+                "  const total = data.amount_total ?? data.amounttotal;\n" +
+                "  if (total !== null && total !== undefined) lines.push('Gesamt: ' + total.toFixed(2) + ' ' + (data.currency || 'EUR'));\n" +
+                "  const vat = data.amount_vat ?? data.amountvat;\n" +
+                "  if (vat) lines.push('MwSt: ' + vat.toFixed(2) + ' ' + (data.currency || 'EUR'));\n" +
+                "  formatted = lines.join('\\n');\n" +
+                "} catch (e) {\n" +
+                "  formatted = raw;\n" +
+                "}\n" +
+                "return [{ json: { response: formatted } }];")
+        })
+    }
+
     // Node 6: IF – Ist Kassenbon? (true=index 0 → JA, false=index 1 → NEIN)
     val ifReceiptNode = buildJsonObject {
         put("id", ifReceiptId)
         put("name", "Ist Kassenbon?")
         put("type", "n8n-nodes-base.if")
         put("typeVersion", 1)
-        put("position", buildJsonArray { add(1250); add(300) })
+        put("position", buildJsonArray { add(1500); add(300) })
         put("parameters", buildJsonObject {
             put("conditions", buildJsonObject {
                 put("string", buildJsonArray {
                     add(buildJsonObject {
-                        put("value1", "={{ \$json.response.toLowerCase().trim() }}")
-                        put("operation", "contains")
-                        put("value2", "true")
+                        put("value1", "={{ \$json.response.trim() }}")
+                        put("operation", "isNotEmpty")
                     })
                 })
             })
         })
     }
 
-    // Node 7: Validierung OK (true branch) → Zwischenmeldung
-    val yesReceiptAnswer = buildJsonObject {
-        put("id", yesReceiptId)
-        put("name", "Antwort: Validierung OK")
-        put("type", "n8n-nodes-base.telegram")
-        put("typeVersion", 1.1)
-        put("position", buildJsonArray { add(1500); add(150) })
-        put("parameters", buildJsonObject {
-            put("operation", "sendMessage")
-            put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
-            put("text", "Receipt validated! Extracting data...")
-            put("additionalFields", buildJsonObject {
-                put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
-                put("appendAttribution", false)
-            })
-        })
-        put("credentials", buildJsonObject {
-            put("telegramApi", buildJsonObject {
-                put("id", credentialId)
-                put("name", "Telegram Bot")
-            })
-        })
+    // Node 7b: Ollama OCR – Validierung + Extraktion in einem Schritt
+    val ocrPrompt = when {
+        ocrModel.startsWith("glm-ocr")                                        -> "Text Recognition:"
+        ocrModel.startsWith("Keyvan/german-ocr") || ocrModel.startsWith("german-ocr") -> "Extrahiere die Rechnung im Bild als JSON."
+        ocrModel.startsWith("deepseek-ocr")                                   -> "Extract the text in the image."
+        else                                                                   -> "Extract the text in the image."
     }
-
-    // Node 7b: Ollama OCR – Daten aus Kassenbon extrahieren
     val ocrNode = buildJsonObject {
         put("id", ocrId)
         put("name", "Ollama OCR")
         put("type", "n8n-nodes-base.httpRequest")
         put("typeVersion", 4.2)
-        put("position", buildJsonArray { add(1750); add(150) })
+        put("position", buildJsonArray { add(1250); add(300) })
         put("parameters", buildJsonObject {
             put("method", "POST")
             put("url", ollamaUrl)
             put("sendBody", true)
             put("specifyBody", "json")
-            put("jsonBody", "={{ JSON.stringify({ model: \"$ocrModel\", prompt: \"<|grounding|>Convert the document to markdown.\", stream: false, images: [\$('Zu Base64').item.json.imageBase64] }) }}")
+            put("jsonBody", "={{ JSON.stringify({ model: \"$ocrModel\", prompt: \"$ocrPrompt\", stream: false, images: [\$json.imageBase64] }) }}")
             put("options", buildJsonObject {
                 put("timeout", 300000)
             })
@@ -349,7 +357,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         put("parameters", buildJsonObject {
             put("operation", "sendMessage")
             put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
-            put("text", "={{ \$json.response }}")
+            put("text", "={{ \$('Format OCR').item.json.response }}")
             put("additionalFields", buildJsonObject {
                 put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
                 put("appendAttribution", false)
@@ -369,7 +377,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         put("name", "Antwort: Kein Kassenbon")
         put("type", "n8n-nodes-base.telegram")
         put("typeVersion", 1.1)
-        put("position", buildJsonArray { add(1500); add(450) })
+        put("position", buildJsonArray { add(1750); add(500) })
         put("parameters", buildJsonObject {
             put("operation", "sendMessage")
             put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
@@ -431,17 +439,17 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         put("Zu Base64", buildJsonObject {
             put("main", buildJsonArray {
                 add(buildJsonArray {
-                    add(buildJsonObject { put("node", "Ollama Validierung"); put("type", "main"); put("index", 0) })
+                    add(buildJsonObject { put("node", "Ollama OCR"); put("type", "main"); put("index", 0) })
                 })
             })
         })
-        put("Ollama Validierung", buildJsonObject {
+        put("Ollama OCR", buildJsonObject {
             put("main", buildJsonArray {
-                // index 0 = success
+                // index 0 = success → IF prüfen
                 add(buildJsonArray {
                     add(buildJsonObject { put("node", "Ist Kassenbon?"); put("type", "main"); put("index", 0) })
                 })
-                // index 1 = error (timeout etc.)
+                // index 1 = error → Timeout
                 add(buildJsonArray {
                     add(buildJsonObject { put("node", "Antwort: Timeout"); put("type", "main"); put("index", 0) })
                 })
@@ -449,32 +457,20 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         })
         put("Ist Kassenbon?", buildJsonObject {
             put("main", buildJsonArray {
-                // index 0 = true → JA
+                // index 0 = true → Format OCR
                 add(buildJsonArray {
-                    add(buildJsonObject { put("node", "Antwort: Validierung OK"); put("type", "main"); put("index", 0) })
+                    add(buildJsonObject { put("node", "Format OCR"); put("type", "main"); put("index", 0) })
                 })
-                // index 1 = false → NEIN
+                // index 1 = false → Kein Kassenbon
                 add(buildJsonArray {
                     add(buildJsonObject { put("node", "Antwort: Kein Kassenbon"); put("type", "main"); put("index", 0) })
                 })
             })
         })
-        put("Antwort: Validierung OK", buildJsonObject {
+        put("Format OCR", buildJsonObject {
             put("main", buildJsonArray {
-                add(buildJsonArray {
-                    add(buildJsonObject { put("node", "Ollama OCR"); put("type", "main"); put("index", 0) })
-                })
-            })
-        })
-        put("Ollama OCR", buildJsonObject {
-            put("main", buildJsonArray {
-                // index 0 = success → OCR Ergebnis senden
                 add(buildJsonArray {
                     add(buildJsonObject { put("node", "Antwort: OCR Ergebnis"); put("type", "main"); put("index", 0) })
-                })
-                // index 1 = error → Timeout
-                add(buildJsonArray {
-                    add(buildJsonObject { put("node", "Antwort: Timeout"); put("type", "main"); put("index", 0) })
                 })
             })
         })
@@ -490,11 +486,10 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             getFileNode,
             downloadNode,
             toBase64Node,
-            ollamaNode,
             timeoutNode,
             ifReceiptNode,
-            yesReceiptAnswer,
             ocrNode,
+            formatNode,
             ocrResultNode,
             noReceiptAnswer
         ),
