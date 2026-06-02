@@ -27,6 +27,7 @@ fun main() {
     // === KONFIGURATION ===
     val ollamaUrl = dotenv["OLLAMA_URL"] ?: System.getenv("OLLAMA_URL") ?: "http://ollama:11434/api/generate"
     val ollamaModel = dotenv["OLLAMA_MODEL"] ?: System.getenv("OLLAMA_MODEL") ?: "moondream2"
+    val ocrModel = dotenv["OLLAMA_OCR_MODEL"] ?: System.getenv("OLLAMA_OCR_MODEL") ?: "deepseek-ocr:latest"
     // =====================
 
     val client = N8nClient(baseUrl = n8nUrl, apiKey = apiKey)
@@ -47,7 +48,7 @@ fun main() {
             }
 
             println("Erstelle neuen Workflow...")
-            val workflow = buildReceiptValidationWorkflow(credentialId, ollamaUrl, ollamaModel, botToken)
+            val workflow = buildReceiptValidationWorkflow(credentialId, ollamaUrl, ollamaModel, ocrModel, botToken)
             val created = client.createFullWorkflow(workflow)
             println("✅ Workflow erstellt: [${created.id}] ${created.name}")
 
@@ -71,7 +72,7 @@ fun main() {
     }
 }
 
-fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, model: String, botToken: String): WorkflowCreateRequest {
+fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, model: String, ocrModel: String, botToken: String): WorkflowCreateRequest {
     val triggerId       = uuidShort()
     val ifPhotoId       = uuidShort()
     val validatingId    = uuidShort()
@@ -84,6 +85,8 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
     val yesReceiptId    = uuidShort()
     val noPhotoId       = uuidShort()
     val timeoutId       = uuidShort()
+    val ocrId           = uuidShort()
+    val ocrResultId     = uuidShort()
 
     // Node 1: Telegram Trigger
     val triggerNode = buildJsonObject {
@@ -137,6 +140,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             put("text", "Validating photo.. please wait.")
             put("additionalFields", buildJsonObject {
                 put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+                put("appendAttribution", false)
             })
         })
         put("credentials", buildJsonObject {
@@ -160,6 +164,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             put("text", "Bitte sende ein Bild von deinem Kassenbon oder deiner Rechnung.")
             put("additionalFields", buildJsonObject {
                 put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+                put("appendAttribution", false)
             })
         })
         put("credentials", buildJsonObject {
@@ -259,6 +264,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             put("text", "Die Verarbeitung hat zu lange gedauert. Bitte versuche es erneut.")
             put("additionalFields", buildJsonObject {
                 put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+                put("appendAttribution", false)
             })
         })
         put("credentials", buildJsonObject {
@@ -289,7 +295,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         })
     }
 
-    // Node 7: Validierung OK (true branch)
+    // Node 7: Validierung OK (true branch) → Zwischenmeldung
     val yesReceiptAnswer = buildJsonObject {
         put("id", yesReceiptId)
         put("name", "Antwort: Validierung OK")
@@ -299,9 +305,54 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         put("parameters", buildJsonObject {
             put("operation", "sendMessage")
             put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
-            put("text", "Validation successful, extracting receipt/invoice data...")
+            put("text", "Receipt validated! Extracting data...")
             put("additionalFields", buildJsonObject {
                 put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+                put("appendAttribution", false)
+            })
+        })
+        put("credentials", buildJsonObject {
+            put("telegramApi", buildJsonObject {
+                put("id", credentialId)
+                put("name", "Telegram Bot")
+            })
+        })
+    }
+
+    // Node 7b: Ollama OCR – Daten aus Kassenbon extrahieren
+    val ocrNode = buildJsonObject {
+        put("id", ocrId)
+        put("name", "Ollama OCR")
+        put("type", "n8n-nodes-base.httpRequest")
+        put("typeVersion", 4.2)
+        put("position", buildJsonArray { add(1750); add(150) })
+        put("parameters", buildJsonObject {
+            put("method", "POST")
+            put("url", ollamaUrl)
+            put("sendBody", true)
+            put("specifyBody", "json")
+            put("jsonBody", "={{ JSON.stringify({ model: \"$ocrModel\", prompt: \"<|grounding|>Convert the document to markdown.\", stream: false, images: [\$('Zu Base64').item.json.imageBase64] }) }}")
+            put("options", buildJsonObject {
+                put("timeout", 300000)
+            })
+            put("onError", "continueErrorOutput")
+        })
+    }
+
+    // Node 7c: OCR Ergebnis → Telegram
+    val ocrResultNode = buildJsonObject {
+        put("id", ocrResultId)
+        put("name", "Antwort: OCR Ergebnis")
+        put("type", "n8n-nodes-base.telegram")
+        put("typeVersion", 1.1)
+        put("position", buildJsonArray { add(2000); add(150) })
+        put("parameters", buildJsonObject {
+            put("operation", "sendMessage")
+            put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
+            put("text", "={{ \$json.response }}")
+            put("additionalFields", buildJsonObject {
+                put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+                put("appendAttribution", false)
             })
         })
         put("credentials", buildJsonObject {
@@ -325,6 +376,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             put("text", "This is not a receipt or invoice. Please send a valid image.")
             put("additionalFields", buildJsonObject {
                 put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+                put("appendAttribution", false)
             })
         })
         put("credentials", buildJsonObject {
@@ -407,6 +459,25 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
                 })
             })
         })
+        put("Antwort: Validierung OK", buildJsonObject {
+            put("main", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Ollama OCR"); put("type", "main"); put("index", 0) })
+                })
+            })
+        })
+        put("Ollama OCR", buildJsonObject {
+            put("main", buildJsonArray {
+                // index 0 = success → OCR Ergebnis senden
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Antwort: OCR Ergebnis"); put("type", "main"); put("index", 0) })
+                })
+                // index 1 = error → Timeout
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Antwort: Timeout"); put("type", "main"); put("index", 0) })
+                })
+            })
+        })
     }
 
     return WorkflowCreateRequest(
@@ -423,6 +494,8 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             timeoutNode,
             ifReceiptNode,
             yesReceiptAnswer,
+            ocrNode,
+            ocrResultNode,
             noReceiptAnswer
         ),
         connections = connections,
