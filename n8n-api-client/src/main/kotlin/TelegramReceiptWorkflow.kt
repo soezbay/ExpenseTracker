@@ -86,14 +86,9 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
     val ocrId           = uuidShort()
     val formatId        = uuidShort()
     val ocrResultId     = uuidShort()
-    val persistPrepId   = uuidShort()
     val saveImageId     = uuidShort()
-    val prepareDirId    = uuidShort()
-    val readCsvId       = uuidShort()
-    val extractCsvId    = uuidShort()
-    val mergeCsvId      = uuidShort()
-    val convertCsvId    = uuidShort()
-    val writeCsvId      = uuidShort()
+    val restoreBinaryId = uuidShort()
+    val jsonSaveId      = uuidShort()
 
     // Node 1: Telegram Trigger
     val triggerNode = buildJsonObject {
@@ -234,7 +229,11 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
                 "const binaryData = item.binary[binaryKey];\n" +
                 "const buffer = await this.helpers.getBinaryDataBuffer(0, binaryKey);\n" +
                 "const base64 = buffer.toString('base64');\n" +
-                "return [{ json: { imageBase64: base64 } }];")
+                "const trigger = \$('Telegram Trigger').item.json.message;\n" +
+                "const chatId = trigger.chat.id;\n" +
+                "const messageId = trigger.message_id;\n" +
+                "const receiptId = chatId + '_' + messageId + '_' + Math.random().toString(36).substring(2, 8);\n" +
+                "return [{ json: { imageBase64: base64, chatId, messageId, receiptId, mimeType: binaryData.mimeType || 'image/jpeg' } }];")
         })
     }
 
@@ -310,150 +309,6 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         })
     }
 
-    // Node 5d: Code – Daten fuer Persistierung aufbereiten (JSON flatten, imagePath)
-    val prepPersistNode = buildJsonObject {
-        put("id", persistPrepId)
-        put("name", "Prep Persist")
-        put("type", "n8n-nodes-base.code")
-        put("typeVersion", 2)
-        put("position", buildJsonArray { add(1900); add(150) })
-        put("parameters", buildJsonObject {
-            put("language", "javaScript")
-            put("jsCode",
-                "const raw = \$('Ollama OCR').item.json.response;\n" +
-                "let data = {};\n" +
-                "try {\n" +
-                "  let s = raw.trim();\n" +
-                "  if (s.startsWith('```')) s = s.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```$/, '');\n" +
-                "  data = JSON.parse(s);\n" +
-                "} catch (e) { data = {}; }\n" +
-                "const msgId = \$('Telegram Trigger').item.json.message.message_id;\n" +
-                "const now = new Date();\n" +
-                "const imagePath = '/media/raid_storage/n8n/expenseTracker/images/' + msgId + '.jpg';\n" +
-                "const receipt = {\n" +
-                "  date: data.invoice_date || data.invoicedate || '',\n" +
-                "  sender_name: (data.sender?.name || '').replace(/,/g, ' '),\n" +
-                "  sender_address: (data.sender?.address || '').replace(/,/g, ' '),\n" +
-                "  invoice_number: data.invoice_number || data.invoicenumber || '',\n" +
-                "  amount_total: data.amount_total ?? data.amounttotal ?? '',\n" +
-                "  amount_vat: data.amount_vat ?? data.amountvat ?? '',\n" +
-                "  currency: data.currency || 'EUR',\n" +
-                "  image_path: imagePath,\n" +
-                "  created_at: now.toISOString()\n" +
-                "};\n" +
-                "return [{ json: receipt }];")
-        })
-    }
-
-    // Node 5e: Write Binary File – Bild lokal speichern (parallel zu Base64)
-    val saveImageNode = buildJsonObject {
-        put("id", saveImageId)
-        put("name", "Bild speichern")
-        put("type", "n8n-nodes-base.writeBinaryFile")
-        put("typeVersion", 1)
-        put("position", buildJsonArray { add(1150); add(450) })
-        put("parameters", buildJsonObject {
-            put("fileName", "={{ '/media/raid_storage/n8n/expenseTracker/images/' + \$('Telegram Trigger').item.json.message.message_id + '.jpg' }}")
-            put("dataPropertyName", "data")
-            put("options", buildJsonObject {
-                put("executeOnce", true)
-            })
-        })
-    }
-
-    // Node 5f: Execute Command – Verzeichnis und leere CSV anlegen (falls nicht vorhanden)
-    val prepareDirNode = buildJsonObject {
-        put("id", prepareDirId)
-        put("name", "Verzeichnis vorbereiten")
-        put("type", "n8n-nodes-base.executeCommand")
-        put("typeVersion", 2.1)
-        put("position", buildJsonArray { add(1900); add(650) })
-        put("parameters", buildJsonObject {
-            put("command", "mkdir -p /media/raid_storage/n8n/expenseTracker/images && FILE=\"/media/raid_storage/n8n/expenseTracker/receipts_\$(date +%Y).csv\" && if [ ! -f \"\$FILE\" ]; then echo 'date,sender_name,sender_address,invoice_number,amount_total,amount_vat,currency,image_path,created_at' > \"\$FILE\"; fi && echo 'done'")
-            put("executeOnce", true)
-        })
-    }
-
-    // Node 5g: Read Binary File – bestehende CSV lesen
-    val readCsvNode = buildJsonObject {
-        put("id", readCsvId)
-        put("name", "CSV lesen")
-        put("type", "n8n-nodes-base.readBinaryFile")
-        put("typeVersion", 1)
-        put("position", buildJsonArray { add(1900); add(500) })
-        put("parameters", buildJsonObject {
-            put("filePath", "={{ '/media/raid_storage/n8n/expenseTracker/receipts_' + new Date().getFullYear() + '.csv' }}")
-            put("options", buildJsonObject {
-                put("continueOnFail", true)
-            })
-        })
-    }
-
-    // Node 5g: Extract From File – CSV → JSON
-    val extractCsvNode = buildJsonObject {
-        put("id", extractCsvId)
-        put("name", "CSV parsen")
-        put("type", "n8n-nodes-base.extractFromFile")
-        put("typeVersion", 1)
-        put("position", buildJsonArray { add(2150); add(500) })
-        put("parameters", buildJsonObject {
-            put("options", buildJsonObject {})
-            put("operation", "csv")
-        })
-    }
-
-    // Node 5h: Code – alte + neue Zeilen zusammenfuehren
-    val mergeCsvNode = buildJsonObject {
-        put("id", mergeCsvId)
-        put("name", "CSV zusammenfuehren")
-        put("type", "n8n-nodes-base.code")
-        put("typeVersion", 2)
-        put("position", buildJsonArray { add(2400); add(500) })
-        put("parameters", buildJsonObject {
-            put("language", "javaScript")
-            put("jsCode",
-                "const newRow = \$('Prep Persist').item.json;\n" +
-                "const existing = \$('CSV parsen').all().map(i => i.json);\n" +
-                "if (existing.length === 1 && Object.keys(existing[0]).length === 0) {\n" +
-                "  return [{ json: newRow }];\n" +
-                "}\n" +
-                "const headers = Object.keys(newRow);\n" +
-                "const out = existing.filter(r => headers.some(h => r[h] !== undefined && r[h] !== ''));\n" +
-                "out.push(newRow);\n" +
-                "return out.map(r => ({ json: r }));")
-        })
-    }
-
-    // Node 5i: Convert to File – JSON → CSV
-    val convertCsvNode = buildJsonObject {
-        put("id", convertCsvId)
-        put("name", "CSV erstellen")
-        put("type", "n8n-nodes-base.convertToFile")
-        put("typeVersion", 1)
-        put("position", buildJsonArray { add(2650); add(500) })
-        put("parameters", buildJsonObject {
-            put("operation", "csv")
-            put("fileName", "={{ 'receipts_' + new Date().getFullYear() + '.csv' }}")
-            put("options", buildJsonObject {})
-        })
-    }
-
-    // Node 5j: Write Binary File – CSV speichern
-    val writeCsvNode = buildJsonObject {
-        put("id", writeCsvId)
-        put("name", "CSV speichern")
-        put("type", "n8n-nodes-base.writeBinaryFile")
-        put("typeVersion", 1)
-        put("position", buildJsonArray { add(2900); add(500) })
-        put("parameters", buildJsonObject {
-            put("fileName", "={{ '/media/raid_storage/n8n/expenseTracker/receipts_' + new Date().getFullYear() + '.csv' }}")
-            put("dataPropertyName", "data")
-            put("options", buildJsonObject {
-                put("executeOnce", true)
-            })
-        })
-    }
-
     // Node 6: IF – Ist Kassenbon? (true=index 0 → JA, false=index 1 → NEIN)
     val ifReceiptNode = buildJsonObject {
         put("id", ifReceiptId)
@@ -475,7 +330,6 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
 
     // Node 7b: Ollama OCR – Validierung + Extraktion in einem Schritt
     val ocrPrompt = when {
-        ocrModel.startsWith("glm-ocr")                                        -> "Text Recognition:"
         ocrModel.startsWith("Keyvan/german-ocr") || ocrModel.startsWith("german-ocr") -> "Extrahiere die Rechnung im Bild als JSON."
         ocrModel.startsWith("deepseek-ocr")                                   -> "Extract the text in the image."
         else                                                                   -> "Extract the text in the image."
@@ -523,7 +377,113 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         })
     }
 
-    // Node 8: Kein Kassenbon (false branch)
+    // Node 8: Binary wiederherstellen (für Write Binary File)
+    val restoreBinaryNode = buildJsonObject {
+        put("id", restoreBinaryId)
+        put("name", "Restore Binary")
+        put("type", "n8n-nodes-base.code")
+        put("typeVersion", 2)
+        put("position", buildJsonArray { add(1875); add(300) })
+        put("parameters", buildJsonObject {
+            put("language", "javaScript")
+            put("jsCode",
+                "const meta = \$('Zu Base64').item.json;\n" +
+                "const binaryData = \$('Bild herunterladen').item.binary;\n" +
+                "const key = Object.keys(binaryData)[0];\n" +
+                "return [{ json: { receiptId: meta.receiptId, mimeType: meta.mimeType }, binary: { data: binaryData[key] } }];")
+        })
+    }
+
+    // Node 8a: Bild lokal speichern (fs.writeFileSync)
+    val saveImageNode = buildJsonObject {
+        put("id", saveImageId)
+        put("name", "Bild speichern")
+        put("type", "n8n-nodes-base.code")
+        put("typeVersion", 2)
+        put("position", buildJsonArray { add(2000); add(300) })
+        put("parameters", buildJsonObject {
+            put("language", "javaScript")
+            put("jsCode",
+                "const fs = require('fs');\n" +
+                "const path = require('path');\n" +
+                "const meta = \$input.first().json;\n" +
+                "const dir = '/home/node/.n8n/expenseTracker/bin';\n" +
+                "if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });\n" +
+                "const ext = meta.mimeType === 'image/png' ? '.png' : '.jpg';\n" +
+                "const filePath = path.join(dir, meta.receiptId + ext);\n" +
+                "const binaryData = \$input.first().binary.data;\n" +
+                "const buffer = Buffer.from(binaryData.data, 'base64');\n" +
+                "fs.writeFileSync(filePath, buffer);\n" +
+                "return [{ json: { success: true, filePath } }];")
+        })
+    }
+
+    // Node 8b: JSON-Datei speichern (Receipt + Line Items)
+    val jsonSaveNode = buildJsonObject {
+        put("id", jsonSaveId)
+        put("name", "JSON speichern")
+        put("type", "n8n-nodes-base.code")
+        put("typeVersion", 2)
+        put("position", buildJsonArray { add(2125); add(150) })
+        put("parameters", buildJsonObject {
+            put("language", "javaScript")
+            put("jsCode",
+                "const fs = require('fs');\n" +
+                "const path = require('path');\n" +
+                "const raw = \$('Ollama OCR').item.json.response;\n" +
+                "const meta = \$('Zu Base64').item.json;\n" +
+                "const year = new Date().getFullYear();\n" +
+                "const dir = '/home/node/.n8n/expenseTracker';\n" +
+                "if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });\n" +
+                "const ext = meta.mimeType === 'image/png' ? '.png' : '.jpg';\n" +
+                "const imagePath = path.join(dir, 'bin', meta.receiptId + ext);\n" +
+                "let data = {};\n" +
+                "try {\n" +
+                "  let jsonStr = raw.trim();\n" +
+                "  if (jsonStr.startsWith('\\`\\`\\`')) {\n" +
+                "    jsonStr = jsonStr.replace(/^\\`\\`\\`(?:json)?\\n?/, '').replace(/\\n?\\`\\`\\`$/, '');\n" +
+                "  }\n" +
+                "  data = JSON.parse(jsonStr);\n" +
+                "} catch (e) { data = {}; }\n" +
+                "const s = data.sender || {};\n" +
+                "const items = data.line_items || data.lineitems || [];\n" +
+                "const receipt = {\n" +
+                "  id: meta.receiptId,\n" +
+                "  chatId: meta.chatId,\n" +
+                "  messageId: meta.messageId,\n" +
+                "  createdAt: new Date().toISOString(),\n" +
+                "  imagePath,\n" +
+                "  documentType: data.documenttype || data.document_type || '',\n" +
+                "  language: data.language || '',\n" +
+                "  invoiceNumber: data.invoicenumber || data.invoice_number || '',\n" +
+                "  invoiceDate: data.invoicedate || data.invoice_date || '',\n" +
+                "  dueDate: data.duedate || data.due_date || '',\n" +
+                "  senderName: s.name || '',\n" +
+                "  senderAddress: s.address || '',\n" +
+                "  senderVatId: s.vatid || s.vat_id || '',\n" +
+                "  senderIban: s.iban || '',\n" +
+                "  amountNet: data.amountnet ?? data.amount_net ?? null,\n" +
+                "  amountVat: data.amountvat ?? data.amount_vat ?? null,\n" +
+                "  amountTotal: data.amounttotal ?? data.amount_total ?? null,\n" +
+                "  currency: data.currency || 'EUR',\n" +
+                "  notes: data.notes || '',\n" +
+                "  lineItems: items.map(it => ({\n" +
+                "    position: it.position || 0,\n" +
+                "    description: it.description || '',\n" +
+                "    quantity: it.quantity ?? null,\n" +
+                "    unit: it.unit || '',\n" +
+                "    unitPriceNet: it.unitpricenet ?? it.unit_price_net ?? null,\n" +
+                "    amountNet: it.amountnet ?? it.amount_net ?? null,\n" +
+                "    vatRate: it.vatrate ?? it.vat_rate ?? null\n" +
+                "  }))\n" +
+                "};\n" +
+                "const filePath = path.join(dir, 'receipts_' + year + '.jsonl');\n" +
+                "fs.appendFileSync(filePath, JSON.stringify(receipt) + '\\n');\n" +
+                "return [{ json: { success: true, receiptId: receipt.id, file: filePath } }];")
+        })
+    }
+
+    // Node 8e: Kein Kassenbon (false branch)
     val noReceiptAnswer = buildJsonObject {
         put("id", noReceiptId)
         put("name", "Antwort: Kein Kassenbon")
@@ -585,7 +545,6 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             put("main", buildJsonArray {
                 add(buildJsonArray {
                     add(buildJsonObject { put("node", "Zu Base64"); put("type", "main"); put("index", 0) })
-                    add(buildJsonObject { put("node", "Bild speichern"); put("type", "main"); put("index", 0) })
                 })
             })
         })
@@ -610,9 +569,10 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         })
         put("Ist Kassenbon?", buildJsonObject {
             put("main", buildJsonArray {
-                // index 0 = true → Format OCR
+                // index 0 = true → Format OCR (Telegram) + Restore Binary (Persistenz)
                 add(buildJsonArray {
                     add(buildJsonObject { put("node", "Format OCR"); put("type", "main"); put("index", 0) })
+                    add(buildJsonObject { put("node", "Restore Binary"); put("type", "main"); put("index", 0) })
                 })
                 // index 1 = false → Kein Kassenbon
                 add(buildJsonArray {
@@ -623,50 +583,21 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         put("Format OCR", buildJsonObject {
             put("main", buildJsonArray {
                 add(buildJsonArray {
-                    add(buildJsonObject { put("node", "Prep Persist"); put("type", "main"); put("index", 0) })
-                })
-            })
-        })
-        put("Prep Persist", buildJsonObject {
-            put("main", buildJsonArray {
-                add(buildJsonArray {
                     add(buildJsonObject { put("node", "Antwort: OCR Ergebnis"); put("type", "main"); put("index", 0) })
-                    add(buildJsonObject { put("node", "Verzeichnis vorbereiten"); put("type", "main"); put("index", 0) })
                 })
             })
         })
-        put("Verzeichnis vorbereiten", buildJsonObject {
+        put("Restore Binary", buildJsonObject {
             put("main", buildJsonArray {
                 add(buildJsonArray {
-                    add(buildJsonObject { put("node", "CSV lesen"); put("type", "main"); put("index", 0) })
+                    add(buildJsonObject { put("node", "Bild speichern"); put("type", "main"); put("index", 0) })
                 })
             })
         })
-        put("CSV lesen", buildJsonObject {
+        put("Bild speichern", buildJsonObject {
             put("main", buildJsonArray {
                 add(buildJsonArray {
-                    add(buildJsonObject { put("node", "CSV parsen"); put("type", "main"); put("index", 0) })
-                })
-            })
-        })
-        put("CSV parsen", buildJsonObject {
-            put("main", buildJsonArray {
-                add(buildJsonArray {
-                    add(buildJsonObject { put("node", "CSV zusammenfuehren"); put("type", "main"); put("index", 0) })
-                })
-            })
-        })
-        put("CSV zusammenfuehren", buildJsonObject {
-            put("main", buildJsonArray {
-                add(buildJsonArray {
-                    add(buildJsonObject { put("node", "CSV erstellen"); put("type", "main"); put("index", 0) })
-                })
-            })
-        })
-        put("CSV erstellen", buildJsonObject {
-            put("main", buildJsonArray {
-                add(buildJsonArray {
-                    add(buildJsonObject { put("node", "CSV speichern"); put("type", "main"); put("index", 0) })
+                    add(buildJsonObject { put("node", "JSON speichern"); put("type", "main"); put("index", 0) })
                 })
             })
         })
@@ -687,16 +618,10 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             ocrNode,
             formatNode,
             ocrResultNode,
-            noReceiptAnswer,
-            // Persistierung
-            prepPersistNode,
+            restoreBinaryNode,
             saveImageNode,
-            prepareDirNode,
-            readCsvNode,
-            extractCsvNode,
-            mergeCsvNode,
-            convertCsvNode,
-            writeCsvNode
+            jsonSaveNode,
+            noReceiptAnswer
         ),
         connections = connections,
         settings = buildJsonObject {

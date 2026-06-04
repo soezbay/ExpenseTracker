@@ -6,8 +6,8 @@ Automatisierte Kassenbon-Verarbeitung via Telegram und lokale OCR-Modell-Integra
 
 **Stack:**
 - **n8n** (Workflow-Automation) – läuft auf `https://n8n.sozbay.dev`
-- **Telegram Bot** – empfängt Kassenbon-Fotos (auch als Media-Gruppe)
-- **Ollama** – lokale Vision/OCR-Modelle (`deepseek-ocr`, `glm-ocr`, `Keyvan/german-ocr-3`)
+- **Telegram Bot** – empfängt Kassenbon-Fotos
+- **Ollama** – lokale Vision/OCR-Modelle (`deepseek-ocr`, `Keyvan/german-ocr-3`)
 - **Kotlin** – n8n API Client & Workflow-Builder
 
 ---
@@ -20,14 +20,13 @@ Automatisierte Kassenbon-Verarbeitung via Telegram und lokale OCR-Modell-Integra
 - [x] Workflow-Builder für Kassenbon-Verarbeitung
 - [x] OCR-Integration mit dynamischer Prompt-Selektion
 - [x] JSON → lesbarer Text Formatierung via Code-Node
-- [x] Media-Gruppen-Unterstützung (mehrere Bilder als Album)
 - [x] n8n Attribution aus allen Telegram-Nachrichten entfernt
 - [x] `.env` Datei mit Credentials (gitignore)
+- [x] Ergebnisse in SQLite speichern (jährliche Tabellen, User-Isolation)
+- [x] Bilder lokal mit eindeutigem Dateinamen speichern
 
 ### ⏳ Ausstehend
-- [ ] Ergebnisse in Datenbank speichern (z.B. Supabase/Postgres)
 - [ ] Kategorisierung der Artikel hinzufügen
-- [ ] Gruppenverarbeitung final testen (alle Bilder der Gruppe)
 - [ ] Git Repository pushen
 
 ---
@@ -70,49 +69,31 @@ Telegram getFile → Bild herunterladen → Zu Base64
     |
 Ollama OCR (Validation + Extraction)
     |
-[Ist Gruppe?] → Nein
-    |
 [Ist Kassenbon?]
     | Ja
-Format OCR (JSON → lesbarer Text)
-    |
-Antwort: OCR Ergebnis
-```
-
-### Media-Gruppen-Flow
-
-```
-Ollama OCR
-    |
-[Ist Gruppe?] → Ja
-    |
-Gruppe: Speichern (Static Data)
-    |
-Gruppe: Warten (4s)
-    |
-Gruppe: Prüfen (alle Bilder zusammenführen)
-    |
-Antwort: Gruppen-Ergebnis
+Format OCR (JSON → lesbarer Text)    Restore Binary → Bild speichern → Prepare DB → SQLite Receipt → SQLite Line Items
+    |                                                                                     |
+Antwort: OCR Ergebnis                                                                      Persistiert
 ```
 
 ### Node-Details
 
 | Node | Typ | Funktion |
 |------|-----|----------|
-| **Telegram Trigger** | Webhook | Empfängt Fotos & Media-Gruppen |
+| **Telegram Trigger** | Webhook | Empfängt Fotos |
 | **Foto vorhanden?** | IF | Prüft `message.photo` |
 | **Telegram getFile** | HTTP | `getFile` API → `file_path` |
 | **Bild herunterladen** | HTTP | Binary-Download via `file_path` |
-| **Zu Base64** | Code | Binary → Base64 String |
+| **Zu Base64** | Code | Binary → Base64 + `chatId`, `messageId`, `receiptId` |
 | **Ollama OCR** | HTTP | POST an Ollama mit Bild + Prompt |
-| **Ist Gruppe?** | IF | Prüft `media_group_id` |
-| **Gruppe: Speichern** | Code | Static Data Zwischenspeicher |
-| **Gruppe: Warten** | Wait | 4 Sekunden (alle Bilder ankommen) |
-| **Gruppe: Prüfen** | Code | Ergebnisse zusammenführen & formatieren |
 | **Ist Kassenbon?** | IF | Prüft ob OCR-Response nicht leer |
 | **Format OCR** | Code | JSON → Telegram-lesbarer Text |
 | **Antwort: OCR Ergebnis** | Telegram | Sendet formatierten Text |
-| **Antwort: Gruppen-Ergebnis** | Telegram | Sendet gruppierte Ergebnisse |
+| **Restore Binary** | Code | Holt Binary vom Download-Node zurück |
+| **Bild speichern** | Write Binary File | Speichert Bild als `<receiptId>.jpg/.png` |
+| **Prepare DB** | Code | Parst OCR-JSON, bereitet SQLite-Daten vor |
+| **SQLite: Receipt** | SQLite | `CREATE TABLE` + `INSERT INTO receipts_YYYY` |
+| **SQLite: Line Items** | SQLite | `CREATE TABLE` + `INSERT INTO line_items_YYYY` |
 
 ---
 
@@ -186,6 +167,17 @@ cd n8n-api-client
 }
 ```
 
+### SQLite Persistenz
+
+**Datenbank:** `/media/raid_storage/n8n/expenseTracker/expenses.db`
+
+**Tabellen:**
+- `receipts_YYYY` – Rechnungskopf (id, chat_id, document_type, invoice_number, invoice_date, sender_name, amount_total, currency, image_path, ...)
+- `line_items_YYYY` – Einzelposten (receipt_id, position, description, quantity, unit_price_net, amount_net, vat_rate, ...)
+
+**Bildspeicher:** `/media/raid_storage/n8n/expenseTracker/bin/<receiptId>.jpg/.png`
+- `receiptId = <chat_id>_<message_id>_<random>` (global eindeutig)
+
 ### Telegram-Ausgabe
 
 ```
@@ -228,7 +220,7 @@ MwSt: 1.38 EUR
 ```powershell
 cd C:\Users\safoz\IdeaProjects\ExpenseTracker
 git add .
-git commit -m "Update: OCR Integration mit Gruppen-Support"
+git commit -m "Update: OCR + SQLite Persistenz mit User-Isolation"
 git push origin main
 ```
 
@@ -236,10 +228,8 @@ git push origin main
 
 ## Nächste Schritte
 
-1. **Ergebnisse speichern** → Datenbank-Node nach Format OCR einfügen
-2. **Artikel-Kategorisierung** → Zweites LLM-Call für Kategorien
-3. **Gruppenverarbeitung testen** → Mehrere Bilder als Album senden
-4. **Git pushen** → Repository aktualisieren
+1. **Artikel-Kategorisierung** → Zweites LLM-Call für Kategorien
+2. **Git pushen** → Repository aktualisieren
 
 ---
 
