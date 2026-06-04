@@ -2,13 +2,13 @@
 
 ## Projekt-Übersicht
 
-Automatisierte Kassenbon-Verarbeitung via Telegram und lokale LLM-Integration mit n8n.
+Automatisierte Kassenbon-Verarbeitung via Telegram und lokale OCR-Modell-Integration mit n8n.
 
 **Stack:**
 - **n8n** (Workflow-Automation) – läuft auf `https://n8n.sozbay.dev`
-- **Telegram Bot** – empfängt Kassenbon-Fotos
-- **Lokale LLM** (z.B. Ollama) – analysiert Bilder auf dem Homeserver
-- **Kotlin** – n8n API Client
+- **Telegram Bot** – empfängt Kassenbon-Fotos (auch als Media-Gruppe)
+- **Ollama** – lokale Vision/OCR-Modelle (`deepseek-ocr`, `glm-ocr`, `Keyvan/german-ocr-3`)
+- **Kotlin** – n8n API Client & Workflow-Builder
 
 ---
 
@@ -16,73 +16,121 @@ Automatisierte Kassenbon-Verarbeitung via Telegram und lokale LLM-Integration mi
 
 ### ✅ Abgeschlossen
 - [x] n8n API Client in Kotlin erstellt
-- [x] Telegram Credential in n8n konfiguriert (ID: `5HZvjIhAH6nQ8`)
+- [x] Telegram Credential in n8n konfiguriert (auto-created via API)
 - [x] Workflow-Builder für Kassenbon-Verarbeitung
-- [x] HTTP Request Node für LLM-Integration
+- [x] OCR-Integration mit dynamischer Prompt-Selektion
+- [x] JSON → lesbarer Text Formatierung via Code-Node
+- [x] Media-Gruppen-Unterstützung (mehrere Bilder als Album)
+- [x] n8n Attribution aus allen Telegram-Nachrichten entfernt
 - [x] `.env` Datei mit Credentials (gitignore)
 
 ### ⏳ Ausstehend
-- [ ] LLM-API-URL in `TelegramReceiptWorkflow.kt:28` eintragen
-- [ ] Workflow via `.\gradlew runTelegram` erstellen
-- [ ] Workflow in n8n testen (Foto an Bot senden)
-- [ ] Kassenbon-Analyse-Prompt optimieren (`.kt:140`)
-- [ ] Ergebnisse speichern (Datenbank/API)
+- [ ] Ergebnisse in Datenbank speichern (z.B. Supabase/Postgres)
+- [ ] Kategorisierung der Artikel hinzufügen
+- [ ] Gruppenverarbeitung final testen (alle Bilder der Gruppe)
 - [ ] Git Repository pushen
 
 ---
 
 ## Konfiguration
 
-### 1. LLM-API-URL eintragen
-
-**Datei:** `n8n-api-client/src/main/kotlin/TelegramReceiptWorkflow.kt:28`
-
-```kotlin
-val llmApiUrl = "http://192.168.1.100:11434/api/generate"  // Deine LLM-URL
-```
-
-**Beispiele:**
-- **Ollama:** `http://localhost:11434/api/generate`
-- **llama.cpp:** `http://localhost:8000/completion`
-- **vLLM:** `http://localhost:8000/v1/chat/completions`
-
-### 2. .env Datei
+### 1. .env Datei
 
 **Datei:** `n8n-api-client/.env`
 
 ```env
 N8N_URL=https://n8n.sozbay.dev
-N8N_API_KEY=dein_api_key_hier
-TELEGRAM_BOT_TOKEN=dein_bot_token_hier
+N8N_API_KEY=dein_n8n_api_key_hier
+TELEGRAM_BOT_TOKEN=dein_telegram_bot_token_hier
+
+# Ollama (fuer Docker-Stack: Service-Namen verwenden)
+OLLAMA_URL=http://ollama:11434/api/generate
+OLLAMA_MODEL=qwen3-vl:4b
+OLLAMA_OCR_MODEL=Keyvan/german-ocr-3:latest
 ```
+
+**Unterstützte OCR-Modelle:**
+- `Keyvan/german-ocr-3` – **Empfohlen** für deutsche Rechnungen (strukturiertes JSON)
+- `deepseek-ocr:latest` – Allgemeine OCR (Markdown/Plaintext)
 
 ---
 
 ## Workflow-Architektur
 
+### Einzelbild-Flow
+
 ```
 Telegram Trigger
-    ↓
-[Foto vorhanden?] (IF-Node)
-    ↓ (ja)
-An LLM senden (HTTP POST)
-    ↓
-Kassenbon-Daten zurück
+    |
+[Foto vorhanden?]
+    | Ja
+Antwort: "Validating photo.."
+    |
+Telegram getFile → Bild herunterladen → Zu Base64
+    |
+Ollama OCR (Validation + Extraction)
+    |
+[Ist Gruppe?] → Nein
+    |
+[Ist Kassenbon?]
+    | Ja
+Format OCR (JSON → lesbarer Text)
+    |
+Antwort: OCR Ergebnis
+```
+
+### Media-Gruppen-Flow
+
+```
+Ollama OCR
+    |
+[Ist Gruppe?] → Ja
+    |
+Gruppe: Speichern (Static Data)
+    |
+Gruppe: Warten (4s)
+    |
+Gruppe: Prüfen (alle Bilder zusammenführen)
+    |
+Antwort: Gruppen-Ergebnis
 ```
 
 ### Node-Details
 
 | Node | Typ | Funktion |
 |------|-----|----------|
-| **Telegram Trigger** | Webhook | Wartet auf Fotos |
+| **Telegram Trigger** | Webhook | Empfängt Fotos & Media-Gruppen |
 | **Foto vorhanden?** | IF | Prüft `message.photo` |
-| **An LLM senden** | HTTP Request | POST an lokale LLM |
+| **Telegram getFile** | HTTP | `getFile` API → `file_path` |
+| **Bild herunterladen** | HTTP | Binary-Download via `file_path` |
+| **Zu Base64** | Code | Binary → Base64 String |
+| **Ollama OCR** | HTTP | POST an Ollama mit Bild + Prompt |
+| **Ist Gruppe?** | IF | Prüft `media_group_id` |
+| **Gruppe: Speichern** | Code | Static Data Zwischenspeicher |
+| **Gruppe: Warten** | Wait | 4 Sekunden (alle Bilder ankommen) |
+| **Gruppe: Prüfen** | Code | Ergebnisse zusammenführen & formatieren |
+| **Ist Kassenbon?** | IF | Prüft ob OCR-Response nicht leer |
+| **Format OCR** | Code | JSON → Telegram-lesbarer Text |
+| **Antwort: OCR Ergebnis** | Telegram | Sendet formatierten Text |
+| **Antwort: Gruppen-Ergebnis** | Telegram | Sendet gruppierte Ergebnisse |
+
+---
+
+## OCR Prompts (dynamisch)
+
+Die Prompts werden automatisch basierend auf `OLLAMA_OCR_MODEL` gewählt:
+
+| Modell-Prefix | Prompt |
+|---------------|--------|
+| `Keyvan/german-ocr` / `german-ocr` | `Extrahiere die Rechnung im Bild als JSON.` |
+| `deepseek-ocr` | `Extract the text in the image.` |
+| *(default)* | `Extract the text in the image.` |
 
 ---
 
 ## Verwendung
 
-### Workflow erstellen & aktivieren
+### Workflow erstellen & deployen
 
 ```bash
 cd n8n-api-client
@@ -91,81 +139,107 @@ cd n8n-api-client
 
 **Output:**
 ```
-✅ Workflow erstellt: [workflow-id] Kassenbon an LLM
-✅ Workflow aktiv: true
-🤖 Workflow aktiv!
-Das Bild wird an deine lokale LLM gesendet: http://...
+✅ Credential erstellt: <credential-id>
+✅ Alten Workflow geloescht.
+✅ Workflow erstellt: [<workflow-id>] Expense Tracker
 ```
 
 ### Manuell testen
 
 1. Öffne `https://n8n.sozbay.dev`
 2. Gehe zu **Workflows**
-3. Öffne **"Kassenbon an LLM"**
-4. Klicke **[Test]** und sende ein Foto an deinen Telegram Bot
+3. Öffne **"Expense Tracker"**
+4. Aktiviere den Workflow (Toggle oben rechts)
+5. Sende ein Foto an deinen Telegram Bot
 
 ---
 
-## LLM-Integration
+## OCR-Integration
 
-### Ollama (Standard)
+### Ollama API Request
 
 ```json
 {
-  "model": "llava",
-  "prompt": "Analysiere diesen Kassenbon. Liste alle Artikel, Preise und das Datum auf.",
+  "model": "Keyvan/german-ocr-3",
+  "prompt": "Extrahiere die Rechnung im Bild als JSON.",
   "stream": false,
   "images": ["base64_encoded_image"]
 }
 ```
 
-### Andere LLMs
+### Beispiel-Antwort (german-ocr-3)
 
-Falls deine LLM ein anderes Format erwartet, passe den Body in `TelegramReceiptWorkflow.kt:138-145` an.
+```json
+{
+  "document_type": "receipt",
+  "language": "de",
+  "invoice_number": "0064 102 715611 0496",
+  "invoice_date": "31/01/2026",
+  "sender": {
+    "name": "ALDI GmbH & Co. KG",
+    "address": "Kurt-Schumacher-Str. 192, 45881 Gelsenkirchen",
+    "vat_id": "DE127135535"
+  },
+  "line_items": [...],
+  "amount_total": 21.17,
+  "currency": "EUR"
+}
+```
+
+### Telegram-Ausgabe
+
+```
+ALDI GmbH & Co. KG, Herten
+Kurt-Schumacher-Str. 192, 45881 Gelsenkirchen
+Datum: 31/01/2026
+Beleg-Nr: 0064 102 715611 0496
+
+--- Artikel ---
+5x ERDNUSSKERNE 4.95 EUR
+3x PAPRIKA KARTOFFELCHIPS 3.33 EUR
+...
+
+Gesamt: 21.17 EUR
+MwSt: 1.38 EUR
+```
 
 ---
 
 ## Troubleshooting
 
-### Problem: "Credential nicht gefunden"
-**Lösung:** Credential-ID in n8n überprüfen:
-- Settings → Credentials → Telegram → ID kopieren
-- In `TelegramReceiptWorkflow.kt:27` eintragen
+### Problem: "Bad Request: message text is empty"
+**Lösung:** `appendAttribution` in allen Telegram-Nodes auf `false` setzen. Bereits im Workflow implementiert.
 
-### Problem: "LLM antwortet nicht"
-**Lösung:** 
-- LLM-URL testen: `curl http://your-llm:port/api/generate`
-- Firewall-Regeln prüfen
-- Ollama läuft? `ollama serve`
+### Problem: "OCR antwortet nicht"
+**Lösung:**
+- Ollama läuft? `ollama list` → Modell vorhanden?
+- GPU läuft? `nvidia-smi`
+- Timeout zu niedrig? Default ist 300s.
 
 ### Problem: "Bild wird nicht erkannt"
 **Lösung:**
 - Telegram muss das Bild als `message.photo` senden (kein Document)
-- LLM muss Vision-Modell sein (z.B. `llava`, nicht `llama2`)
+- Vision/OCR-Modell verwenden (nicht Text-Only)
 
 ---
 
 ## Git Push
 
 ```powershell
-cd C:\Users\safaoezb\IdeaProjects\ExpenseTracker
-git init
+cd C:\Users\safoz\IdeaProjects\ExpenseTracker
 git add .
-git commit -m "Initial commit: n8n Kassenbon-Verarbeitung"
-git remote add origin https://github.com/soezbay/ExpenseTracker.git
-git branch -M main
-git push -u origin main
+git commit -m "Update: OCR Integration mit Gruppen-Support"
+git push origin main
 ```
 
 ---
 
 ## Nächste Schritte
 
-1. **LLM-URL eintragen** → `TelegramReceiptWorkflow.kt:28`
-2. **Workflow testen** → `.\gradlew runTelegram`
-3. **Kassenbon-Prompt anpassen** → `TelegramReceiptWorkflow.kt:140`
-4. **Ergebnisse speichern** → Datenbank-Integration hinzufügen
-5. **Git pushen** → Repository aktualisieren
+1. **Ergebnisse speichern** → Datenbank-Node nach Format OCR einfügen
+2. **Artikel-Kategorisierung** → Zweites LLM-Call für Kategorien
+3. **Gruppenverarbeitung testen** → Mehrere Bilder als Album senden
+4. **Git pushen** → Repository aktualisieren
 
 ---
 
@@ -175,8 +249,8 @@ git push -u origin main
 ExpenseTracker/
 ├── n8n-api-client/
 │   ├── src/main/kotlin/
-│   │   ├── Main.kt                    # Basis-Demo
-│   │   ├── TelegramReceiptWorkflow.kt # Kassenbon-Workflow
+│   │   ├── Main.kt                    # Entry point (runTelegram)
+│   │   ├── TelegramReceiptWorkflow.kt # Workflow-Builder
 │   │   ├── N8nClient.kt               # n8n API Wrapper
 │   │   └── Models.kt                  # Datenklassen
 │   ├── build.gradle.kts
@@ -189,4 +263,4 @@ ExpenseTracker/
 
 ---
 
-**Zuletzt aktualisiert:** 2026-05-16 14:47 UTC+02:00
+**Zuletzt aktualisiert:** 2026-06-04 20:20 UTC+02:00
