@@ -1,4 +1,4 @@
-# Changelog – seit `84dbd34`
+# Changelog 
 
 ## Zusammenfassung
 
