@@ -89,6 +89,9 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
     val saveImageId     = uuidShort()
     val restoreBinaryId = uuidShort()
     val jsonSaveId      = uuidShort()
+    val isExportId      = uuidShort()
+    val exportCsvId     = uuidShort()
+    val sendCsvId       = uuidShort()
 
     // Node 1: Telegram Trigger
     val triggerNode = buildJsonObject {
@@ -483,6 +486,96 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         })
     }
 
+    // Node 9: IF – Export-Kommando? (prüft ob Text mit /export beginnt)
+    val isExportNode = buildJsonObject {
+        put("id", isExportId)
+        put("name", "Export Kommando?")
+        put("type", "n8n-nodes-base.if")
+        put("typeVersion", 1)
+        put("position", buildJsonArray { add(500); add(500) })
+        put("parameters", buildJsonObject {
+            put("conditions", buildJsonObject {
+                put("string", buildJsonArray {
+                    add(buildJsonObject {
+                        put("value1", "={{ \$json.message.text || '' }}")
+                        put("operation", "startsWith")
+                        put("value2", "/export")
+                    })
+                })
+            })
+        })
+    }
+
+    // Node 9a: CSV aus JSONL generieren
+    val exportCsvNode = buildJsonObject {
+        put("id", exportCsvId)
+        put("name", "CSV Export")
+        put("type", "n8n-nodes-base.code")
+        put("typeVersion", 2)
+        put("position", buildJsonArray { add(750); add(500) })
+        put("parameters", buildJsonObject {
+            put("language", "javaScript")
+            put("jsCode",
+                "const fs = require('fs');\n" +
+                "const path = require('path');\n" +
+                "const text = \$('Telegram Trigger').item.json.message.text || '';\n" +
+                "const parts = text.trim().split(/\\s+/);\n" +
+                "const year = parts.length > 1 ? parts[1] : new Date().getFullYear().toString();\n" +
+                "const chatId = \$('Telegram Trigger').item.json.message.chat.id;\n" +
+                "const dir = '/home/node/.n8n/expenseTracker';\n" +
+                "const filePath = path.join(dir, 'receipts_' + year + '.jsonl');\n" +
+                "let receipts = [];\n" +
+                "if (fs.existsSync(filePath)) {\n" +
+                "  const lines = fs.readFileSync(filePath, 'utf8').trim().split('\\n').filter(l => l);\n" +
+                "  receipts = lines.map(l => JSON.parse(l)).filter(r => r.chatId === chatId);\n" +
+                "}\n" +
+                "if (receipts.length === 0) {\n" +
+                "  const csv = 'Keine Belege fuer ' + year + ' vorhanden.';\n" +
+                "  const b64 = Buffer.from(csv, 'utf8').toString('base64');\n" +
+                "  return [{ json: { chatId, year, count: 0, fileName: 'expenses_' + year + '.csv' }, binary: { data: { data: b64, mimeType: 'text/csv', fileName: 'expenses_' + year + '.csv' } } }];\n" +
+                "}\n" +
+                "const headers = ['id','createdAt','documentType','invoiceNumber','invoiceDate','dueDate','senderName','senderAddress','amountNet','amountVat','amountTotal','currency','notes'];\n" +
+                "const csvLines = [headers.join(';')];\n" +
+                "const q = String.fromCharCode(34);\n" +
+                "for (const r of receipts) {\n" +
+                "  csvLines.push(headers.map(h => {\n" +
+                "    const v = r[h] ?? '';\n" +
+                "    const s = String(v).replace(new RegExp(q, 'g'), q + q);\n" +
+                "    return s.includes(';') || s.includes(q) ? q + s + q : s;\n" +
+                "  }).join(';'));\n" +
+                "}\n" +
+                "const csv = csvLines.join('\\n');\n" +
+                "const b64 = Buffer.from(csv, 'utf8').toString('base64');\n" +
+                "return [{ json: { chatId, year, count: receipts.length, fileName: 'expenses_' + year + '.csv' }, binary: { data: { data: b64, mimeType: 'text/csv', fileName: 'expenses_' + year + '.csv' } } }];")
+        })
+    }
+
+    // Node 9b: CSV Datei per Telegram senden
+    val sendCsvNode = buildJsonObject {
+        put("id", sendCsvId)
+        put("name", "CSV senden")
+        put("type", "n8n-nodes-base.telegram")
+        put("typeVersion", 1.1)
+        put("position", buildJsonArray { add(1250); add(450) })
+        put("parameters", buildJsonObject {
+            put("operation", "sendDocument")
+            put("chatId", "={{ \$json.chatId }}")
+            put("binaryData", true)
+            put("binaryPropertyName", "data")
+            put("additionalFields", buildJsonObject {
+                put("caption", "={{ '📊 ' + \$json.count + ' Belege für ' + \$json.year }}")
+                put("appendAttribution", false)
+            })
+        })
+        put("credentials", buildJsonObject {
+            put("telegramApi", buildJsonObject {
+                put("id", credentialId)
+                put("name", "Telegram Bot")
+            })
+        })
+    }
+
+
     // Node 8e: Kein Kassenbon (false branch)
     val noReceiptAnswer = buildJsonObject {
         put("id", noReceiptId)
@@ -521,9 +614,28 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
                 add(buildJsonArray {
                     add(buildJsonObject { put("node", "Antwort: Validating photo"); put("type", "main"); put("index", 0) })
                 })
-                // index 1 = false → kein Foto
+                // index 1 = false → kein Foto → Export-Kommando prüfen
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Export Kommando?"); put("type", "main"); put("index", 0) })
+                })
+            })
+        })
+        put("Export Kommando?", buildJsonObject {
+            put("main", buildJsonArray {
+                // index 0 = true → /export Kommando
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "CSV Export"); put("type", "main"); put("index", 0) })
+                })
+                // index 1 = false → weder Foto noch Export
                 add(buildJsonArray {
                     add(buildJsonObject { put("node", "Antwort: Kein Bild"); put("type", "main"); put("index", 0) })
+                })
+            })
+        })
+        put("CSV Export", buildJsonObject {
+            put("main", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "CSV senden"); put("type", "main"); put("index", 0) })
                 })
             })
         })
@@ -621,6 +733,9 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             restoreBinaryNode,
             saveImageNode,
             jsonSaveNode,
+            isExportNode,
+            exportCsvNode,
+            sendCsvNode,
             noReceiptAnswer
         ),
         connections = connections,

@@ -10,6 +10,89 @@ Automatisierte Kassenbon-Verarbeitung via Telegram und lokale OCR-Modell-Integra
 - **Ollama** – lokale Vision/OCR-Modelle (`deepseek-ocr`, `Keyvan/german-ocr-3`)
 - **Kotlin** – n8n API Client & Workflow-Builder
 
+**Stack yaml:**
+```version: '3.8'
+
+services:
+  coolercontrold:
+    image: coolercontrol/coolercontrold:latest
+    container_name: coolercontrold
+    privileged: true
+    restart: unless-stopped
+    ports:
+      - "11987:11987"
+    volumes:
+      - /etc/coolercontrol:/etc/coolercontrol
+      
+  n8n:
+    # Use the newly built custom image
+    image: n8n-custom:latest
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "8081:8081"  
+    environment:
+      - N8N_HOST=xxx
+      - N8N_PORT=8081
+      - N8N_PROTOCOL=http
+      - GENERIC_TIMEZONE=Europe/Berlin
+      - TZ=Europe/Berlin
+      - WEBHOOK_URL=https://n8n.sozbay.dev/
+      - NODE_FUNCTION_ALLOW_BUILTIN=fs,path
+      - NODE_FUNCTION_ALLOW_EXTERNAL=better-sqlite3
+      # Tell n8n where to find globally installed npm packages
+      - NODE_PATH=/usr/local/lib/node_modules
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - /media/raid_storage/n8n/expenseTracker:/media/raid_storage/n8n/expenseTracker
+    depends_on:
+      - ollama
+    networks:
+      - proxy-net
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "8082:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - proxy-net
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    ports:
+      - "3000:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      - open-webui_data:/app/backend/data
+    depends_on:
+      - ollama
+    networks:
+      - proxy-net
+
+networks:
+  proxy-net:
+    external: true
+
+volumes:
+  n8n_data:
+  ollama_data:
+  open-webui_data: 
+  ```
+
 ---
 
 ## Setup-Status
@@ -22,8 +105,9 @@ Automatisierte Kassenbon-Verarbeitung via Telegram und lokale OCR-Modell-Integra
 - [x] JSON → lesbarer Text Formatierung via Code-Node
 - [x] n8n Attribution aus allen Telegram-Nachrichten entfernt
 - [x] `.env` Datei mit Credentials (gitignore)
-- [x] Ergebnisse in SQLite speichern (jährliche Tabellen, User-Isolation)
-- [x] Bilder lokal mit eindeutigem Dateinamen speichern
+- [x] Bilder lokal mit eindeutigem Dateinamen speichern (`fs.writeFileSync`)
+- [x] Persistenz via JSONL (append-only, multi-user-sicher)
+- [x] `/export` Kommando – CSV-Export per Telegram Chat
 
 ### ⏳ Ausstehend
 - [ ] Kategorisierung der Artikel hinzufügen
@@ -56,13 +140,19 @@ OLLAMA_OCR_MODEL=Keyvan/german-ocr-3:latest
 
 ## Workflow-Architektur
 
-### Einzelbild-Flow
+### Hauptflow (Bild empfangen)
 
 ```
 Telegram Trigger
     |
 [Foto vorhanden?]
-    | Ja
+    | Ja                          | Nein
+    |                         [Export Kommando?]
+    |                           | Ja        | Nein
+    |                       CSV Export    Antwort: Kein Bild
+    |                           |
+    |                       CSV senden
+    |
 Antwort: "Validating photo.."
     |
 Telegram getFile → Bild herunterladen → Zu Base64
@@ -70,18 +160,30 @@ Telegram getFile → Bild herunterladen → Zu Base64
 Ollama OCR (Validation + Extraction)
     |
 [Ist Kassenbon?]
-    | Ja
-Format OCR (JSON → lesbarer Text)    Restore Binary → Bild speichern → Prepare DB → SQLite Receipt → SQLite Line Items
-    |                                                                                     |
-Antwort: OCR Ergebnis                                                                      Persistiert
+    | Ja                                      | Nein
+    |                                    Antwort: Kein Kassenbon
+Format OCR + Restore Binary (parallel)
+    |              |
+Antwort: OCR   Bild speichern → JSON speichern
 ```
+
+### Export-Flow
+
+User sendet `/export` oder `/export 2025` → Bot antwortet mit CSV-Datei.
+- Liest `receipts_YYYY.jsonl`
+- Filtert nach `chatId` des Users
+- Generiert CSV (Semikolon-getrennt, Excel-kompatibel)
+- Sendet als Telegram-Dokument
 
 ### Node-Details
 
 | Node | Typ | Funktion |
 |------|-----|----------|
-| **Telegram Trigger** | Webhook | Empfängt Fotos |
+| **Telegram Trigger** | Webhook | Empfängt Fotos und Textkommandos |
 | **Foto vorhanden?** | IF | Prüft `message.photo` |
+| **Export Kommando?** | IF | Prüft ob Text mit `/export` beginnt |
+| **CSV Export** | Code | Liest JSONL, filtert nach User, generiert CSV |
+| **CSV senden** | Telegram | Sendet CSV als Dokument |
 | **Telegram getFile** | HTTP | `getFile` API → `file_path` |
 | **Bild herunterladen** | HTTP | Binary-Download via `file_path` |
 | **Zu Base64** | Code | Binary → Base64 + `chatId`, `messageId`, `receiptId` |
@@ -90,10 +192,8 @@ Antwort: OCR Ergebnis                                                           
 | **Format OCR** | Code | JSON → Telegram-lesbarer Text |
 | **Antwort: OCR Ergebnis** | Telegram | Sendet formatierten Text |
 | **Restore Binary** | Code | Holt Binary vom Download-Node zurück |
-| **Bild speichern** | Write Binary File | Speichert Bild als `<receiptId>.jpg/.png` |
-| **Prepare DB** | Code | Parst OCR-JSON, bereitet SQLite-Daten vor |
-| **SQLite: Receipt** | SQLite | `CREATE TABLE` + `INSERT INTO receipts_YYYY` |
-| **SQLite: Line Items** | SQLite | `CREATE TABLE` + `INSERT INTO line_items_YYYY` |
+| **Bild speichern** | Code | `fs.writeFileSync` – speichert Bild als `<receiptId>.jpg/.png` |
+| **JSON speichern** | Code | `fs.appendFileSync` – anhängen an `receipts_YYYY.jsonl` |
 
 ---
 
@@ -167,16 +267,23 @@ cd n8n-api-client
 }
 ```
 
-### SQLite Persistenz
+### JSONL Persistenz
 
-**Datenbank:** `/media/raid_storage/n8n/expenseTracker/expenses.db`
+**Datenpfad:** `/home/node/.n8n/expenseTracker/`
 
-**Tabellen:**
-- `receipts_YYYY` – Rechnungskopf (id, chat_id, document_type, invoice_number, invoice_date, sender_name, amount_total, currency, image_path, ...)
-- `line_items_YYYY` – Einzelposten (receipt_id, position, description, quantity, unit_price_net, amount_net, vat_rate, ...)
+**Dateien:**
+- `receipts_YYYY.jsonl` – Eine JSON-Zeile pro Beleg (append-only, multi-user-sicher)
+- `bin/<receiptId>.jpg/.png` – Original-Bilder
 
-**Bildspeicher:** `/media/raid_storage/n8n/expenseTracker/bin/<receiptId>.jpg/.png`
-- `receiptId = <chat_id>_<message_id>_<random>` (global eindeutig)
+**Felder pro Beleg:**
+`id`, `chatId`, `messageId`, `createdAt`, `imagePath`, `documentType`, `language`, `invoiceNumber`, `invoiceDate`, `dueDate`, `senderName`, `senderAddress`, `senderVatId`, `senderIban`, `amountNet`, `amountVat`, `amountTotal`, `currency`, `notes`, `lineItems[]`
+
+**receiptId:** `<chatId>_<messageId>_<random>` (global eindeutig)
+
+**Docker-Umgebungsvariablen (Portainer Stack):**
+```yaml
+- NODE_FUNCTION_ALLOW_BUILTIN=fs,path
+```
 
 ### Telegram-Ausgabe
 
@@ -220,7 +327,7 @@ MwSt: 1.38 EUR
 ```powershell
 cd C:\Users\safoz\IdeaProjects\ExpenseTracker
 git add .
-git commit -m "Update: OCR + SQLite Persistenz mit User-Isolation"
+git commit -m "JSONL Persistenz + /export CSV-Export"
 git push origin main
 ```
 
@@ -230,6 +337,7 @@ git push origin main
 
 1. **Artikel-Kategorisierung** → Zweites LLM-Call für Kategorien
 2. **Git pushen** → Repository aktualisieren
+3. **Dashboard** → Web-UI für Auswertungen
 
 ---
 
@@ -253,4 +361,4 @@ ExpenseTracker/
 
 ---
 
-**Zuletzt aktualisiert:** 2026-06-04 20:20 UTC+02:00
+**Zuletzt aktualisiert:** 2026-06-04 23:25 UTC+02:00
