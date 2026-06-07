@@ -117,6 +117,10 @@ volumes:
 - [x] Window Buffer Memory – Konversations-Kontext per Chat-ID
 - [x] Steuernummer (VAT ID) in Beleg-Ausgabe ergänzt
 - [x] Reply-Kontext: Agent berücksichtigt referenzierte Nachrichten (Telegram Reply)
+- [x] `/list` Kommando – Gespeicherte JSONL-Dateien auflisten
+- [x] `/delete` Kommando – JSONL-Dateien löschen mit Bestätigung
+- [x] CSV Export Fixes – Komma-Trennung, korrektes Quoting, amountTotal/senderName Berechnung
+- [x] Switch Node Refactoring – Einzelner Node statt verketteter IF-Branches
 
 ### ⏳ Ausstehend
 - [ ] Kategorisierung der Artikel hinzufügen
@@ -162,14 +166,13 @@ OLLAMA_AGENT_MODEL=Keyvan/german-text-3.1:latest
 ```
 Telegram Trigger
     |
-[Foto vorhanden?]
-    | Ja                          | Nein
-    |                         [Export Kommando?]
-    |                           | Ja        | Nein
-    |                       CSV Export    AI Agent
-    |                           |            |
-    |                       CSV senden    Antwort: Agent
-    |
+[Nachricht Switch]
+    | Foto    | /export   | /list    | /delete   | default
+    |         |           |          |           |
+    |    CSV Export  Dateien      Dateien    AI Agent
+    |         |      auflisten    loeschen       |
+    |    CSV senden     |            |      Antwort: Agent
+    |                   |            |
 Antwort: "Validating photo.."
     |
 Telegram getFile → Bild herunterladen → Zu Base64
@@ -211,18 +214,32 @@ Export Kommando? → false
 User sendet `/export` oder `/export 2025` → Bot antwortet mit CSV-Datei.
 - Liest `receipts_YYYY.jsonl`
 - Filtert nach `chatId` des Users
-- Generiert CSV (Semikolon-getrennt, Excel-kompatibel)
+- Generiert echtes CSV (Komma-getrennt, RFC 4180 Quoting)
+- Korrigiert `amountTotal` wenn OCR `amountNet + amountVat` ignoriert hat
 - Sendet als Telegram-Dokument
+
+### List-Flow
+
+User sendet `/list` → Bot antwortet mit Liste aller gespeicherten `receipts_YYYY.jsonl`-Dateien und deren Beleg-Anzahl.
+
+### Delete-Flow
+
+User sendet `/delete 2026` → Bot zeigt Vorschau und verlangt Bestätigung.
+User sendet `/delete 2026 confirm` → Datei wird gelöscht.
+User sendet `/delete all` oder `/delete all confirm` für alle Dateien.
 
 ### Node-Details
 
 | Node | Typ | Funktion |
 |------|-----|----------|
 | **Telegram Trigger** | Webhook | Empfängt Fotos und Textkommandos |
-| **Foto vorhanden?** | IF | Prüft `message.photo` |
-| **Export Kommando?** | IF | Prüft ob Text mit `/export` beginnt |
-| **CSV Export** | Code | Liest JSONL, filtert nach User, generiert CSV |
+| **Nachricht Switch** | Switch | Routet Nachrichten: Foto → Bildverarbeitung, /export → CSV, /list → Liste, /delete → Löschen, Default → Agent |
+| **CSV Export** | Code | Liest JSONL, filtert nach User, generiert CSV (Komma, korrektes Quoting) |
 | **CSV senden** | Telegram | Sendet CSV als Dokument |
+| **Dateien auflisten** | Code | Listet alle `receipts_YYYY.jsonl` mit Beleg-Anzahl |
+| **Antwort: Liste** | Telegram | Sendet Listen-Ergebnis |
+| **Dateien loeschen** | Code | Löscht JSONL-Dateien (mit `confirm` Schutz) |
+| **Antwort: Geloescht** | Telegram | Sendet Lösch-Ergebnis |
 | **AI Agent** | LangChain Agent | Beantwortet Fragen zu Ausgaben via Ollama |
 | **Ollama Chat Model** | LLM Sub-Node | `Keyvan/german-text-3.1:latest` |
 | **search_expenses** | Tool Code | Durchsucht JSONL-Belege nach Suchbegriffen |
@@ -237,7 +254,7 @@ User sendet `/export` oder `/export 2025` → Bot antwortet mit CSV-Datei.
 | **Antwort: OCR Ergebnis** | Telegram | Sendet formatierten Text |
 | **Restore Binary** | Code | Holt Binary vom Download-Node zurück |
 | **Bild speichern** | Code | `fs.writeFileSync` – speichert Bild als `<receiptId>.jpg/.png` |
-| **JSON speichern** | Code | `fs.appendFileSync` – anhängen an `receipts_YYYY.jsonl` |
+| **JSON speichern** | Code | `fs.appendFileSync` – anhängen an `receipts_YYYY.jsonl`. Korrigiert amountTotal/senderName |
 
 ---
 
@@ -408,4 +425,4 @@ ExpenseTracker/
 
 ---
 
-**Zuletzt aktualisiert:** 2026-06-07 20:10 UTC+02:00
+**Zuletzt aktualisiert:** 2026-06-07 21:30 UTC+02:00

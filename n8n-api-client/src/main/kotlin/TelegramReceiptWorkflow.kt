@@ -1,4 +1,4 @@
-import io.github.cdimascio.dotenv.dotenv
+﻿import io.github.cdimascio.dotenv.dotenv
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import java.util.*
@@ -95,14 +95,12 @@ fun main() {
 
 fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: String, ollamaUrl: String, model: String, ocrModel: String, agentModel: String, botToken: String): WorkflowCreateRequest {
     val triggerId       = uuidShort()
-    val ifPhotoId       = uuidShort()
     val validatingId    = uuidShort()
     val getFileId       = uuidShort()
     val downloadId      = uuidShort()
     val toBase64Id      = uuidShort()
     val ifReceiptId     = uuidShort()
     val noReceiptId     = uuidShort()
-    val noPhotoId       = uuidShort()
     val timeoutId       = uuidShort()
     val ocrId           = uuidShort()
     val formatId        = uuidShort()
@@ -110,7 +108,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
     val saveImageId     = uuidShort()
     val restoreBinaryId = uuidShort()
     val jsonSaveId      = uuidShort()
-    val isExportId      = uuidShort()
+    val commandSwitchId = uuidShort()
     val exportCsvId     = uuidShort()
     val sendCsvId       = uuidShort()
     val aiAgentId       = uuidShort()
@@ -118,6 +116,12 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
     val agentToolId     = uuidShort()
     val agentMemoryId   = uuidShort()
     val agentResponseId = uuidShort()
+    val listFilesId     = uuidShort()
+    val listResponseId  = uuidShort()
+    val deleteFilesId   = uuidShort()
+    val deleteResponseId = uuidShort()
+    val helpNodeId      = uuidShort()
+    val helpResponseId  = uuidShort()
 
     // Node 1: Telegram Trigger
     val triggerNode = buildJsonObject {
@@ -139,26 +143,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         })
     }
 
-    // Node 2: IF – Foto vorhanden? (true=index 0 → Bild vorhanden, false=index 1 → kein Bild)
-    val ifPhotoNode = buildJsonObject {
-        put("id", ifPhotoId)
-        put("name", "Foto vorhanden?")
-        put("type", "n8n-nodes-base.if")
-        put("typeVersion", 1)
-        put("position", buildJsonArray { add(500); add(300) })
-        put("parameters", buildJsonObject {
-            put("conditions", buildJsonObject {
-                put("string", buildJsonArray {
-                    add(buildJsonObject {
-                        put("value1", "={{ \$json.message.photo ? \$json.message.photo.length.toString() : '' }}")
-                        put("operation", "isNotEmpty")
-                    })
-                })
-            })
-        })
-    }
-
-    // Node 3: Validating photo (true branch nach Foto vorhanden?)
+    // Node 3: Validating photo (Switch output 0 = Foto vorhanden)
     val validatingNode = buildJsonObject {
         put("id", validatingId)
         put("name", "Antwort: Validating photo")
@@ -169,30 +154,6 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
             put("operation", "sendMessage")
             put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
             put("text", "Validating photo.. please wait.")
-            put("additionalFields", buildJsonObject {
-                put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
-                put("appendAttribution", false)
-            })
-        })
-        put("credentials", buildJsonObject {
-            put("telegramApi", buildJsonObject {
-                put("id", credentialId)
-                put("name", "Telegram Bot")
-            })
-        })
-    }
-
-    // Node 4: Kein Bild → Telegram Antwort (fallback wenn Agent fehlschlägt)
-    val noPhotoNode = buildJsonObject {
-        put("id", noPhotoId)
-        put("name", "Antwort: Kein Bild")
-        put("type", "n8n-nodes-base.telegram")
-        put("typeVersion", 1.1)
-        put("position", buildJsonArray { add(1250); add(700) })
-        put("parameters", buildJsonObject {
-            put("operation", "sendMessage")
-            put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
-            put("text", "Bitte sende ein Bild von deinem Kassenbon oder deiner Rechnung, oder stelle mir eine Frage zu deinen Ausgaben.")
             put("additionalFields", buildJsonObject {
                 put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
                 put("appendAttribution", false)
@@ -478,6 +439,23 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 "} catch (e) { data = {}; }\n" +
                 "const s = data.sender || {};\n" +
                 "const items = data.line_items || data.lineitems || [];\n" +
+                "const rawNet = data.amountnet ?? data.amount_net ?? null;\n" +
+                "const rawVat = data.amountvat ?? data.amount_vat ?? null;\n" +
+                "const rawTotal = data.amounttotal ?? data.amount_total ?? null;\n" +
+                "const numNet = rawNet !== null ? parseFloat(rawNet) : null;\n" +
+                "const numVat = rawVat !== null ? parseFloat(rawVat) : null;\n" +
+                "let numTotal = rawTotal !== null ? parseFloat(rawTotal) : null;\n" +
+                "if (numNet !== null && numVat !== null && !isNaN(numNet) && !isNaN(numVat)) {\n" +
+                "  const calc = Math.round((numNet + numVat) * 100) / 100;\n" +
+                "  if (numTotal === null || isNaN(numTotal) || (Math.abs(numTotal - numNet) < 0.01 && numVat > 0)) {\n" +
+                "    numTotal = calc;\n" +
+                "  }\n" +
+                "}\n" +
+                "let senderName = s.name || '';\n" +
+                "if (!senderName && s.address) {\n" +
+                "  const firstLine = s.address.split(/[\\n,]/).map(l => l.trim()).filter(l => l)[0];\n" +
+                "  if (firstLine) senderName = firstLine;\n" +
+                "}\n" +
                 "const receipt = {\n" +
                 "  id: meta.receiptId,\n" +
                 "  chatId: meta.chatId,\n" +
@@ -489,13 +467,13 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 "  invoiceNumber: data.invoicenumber || data.invoice_number || '',\n" +
                 "  invoiceDate: data.invoicedate || data.invoice_date || '',\n" +
                 "  dueDate: data.duedate || data.due_date || '',\n" +
-                "  senderName: s.name || '',\n" +
+                "  senderName: senderName,\n" +
                 "  senderAddress: s.address || '',\n" +
                 "  senderVatId: s.vatid || s.vat_id || '',\n" +
                 "  senderIban: s.iban || '',\n" +
-                "  amountNet: data.amountnet ?? data.amount_net ?? null,\n" +
-                "  amountVat: data.amountvat ?? data.amount_vat ?? null,\n" +
-                "  amountTotal: data.amounttotal ?? data.amount_total ?? null,\n" +
+                "  amountNet: isNaN(numNet) ? null : numNet,\n" +
+                "  amountVat: isNaN(numVat) ? null : numVat,\n" +
+                "  amountTotal: isNaN(numTotal) ? null : numTotal,\n" +
                 "  currency: data.currency || 'EUR',\n" +
                 "  notes: data.notes || '',\n" +
                 "  lineItems: items.map(it => ({\n" +
@@ -514,20 +492,134 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         })
     }
 
-    // Node 9: IF – Export-Kommando? (prüft ob Text mit /export beginnt)
-    val isExportNode = buildJsonObject {
-        put("id", isExportId)
-        put("name", "Export Kommando?")
-        put("type", "n8n-nodes-base.if")
-        put("typeVersion", 1)
-        put("position", buildJsonArray { add(500); add(500) })
+    // Node 2: Switch – Nachrichten aufteilen (Foto, /export, /list, /delete, /help, default → Agent)
+    val commandSwitchNode = buildJsonObject {
+        put("id", commandSwitchId)
+        put("name", "Nachricht Switch")
+        put("type", "n8n-nodes-base.switch")
+        put("typeVersion", 3)
+        put("position", buildJsonArray { add(500); add(300) })
         put("parameters", buildJsonObject {
-            put("conditions", buildJsonObject {
-                put("string", buildJsonArray {
+            put("mode", "rules")
+            put("options", buildJsonObject {
+                put("fallbackOutput", "extra")
+            })
+            put("rules", buildJsonObject {
+                put("values", buildJsonArray {
                     add(buildJsonObject {
-                        put("value1", "={{ \$json.message.text || '' }}")
-                        put("operation", "startsWith")
-                        put("value2", "/export")
+                        put("conditions", buildJsonObject {
+                            put("options", buildJsonObject {
+                                put("caseSensitive", true)
+                                put("leftValue", "")
+                                put("typeValidation", "loose")
+                            })
+                            put("conditions", buildJsonArray {
+                                add(buildJsonObject {
+                                    put("id", uuidShort())
+                                    put("leftValue", "={{ \$json.message.photo ? 'yes' : '' }}")
+                                    put("rightValue", "yes")
+                                    put("operator", buildJsonObject {
+                                        put("type", "string")
+                                        put("operation", "equals")
+                                    })
+                                })
+                            })
+                            put("combinator", "and")
+                        })
+                        put("renameOutput", false)
+                        put("outputKey", "0")
+                    })
+                    add(buildJsonObject {
+                        put("conditions", buildJsonObject {
+                            put("options", buildJsonObject {
+                                put("caseSensitive", true)
+                                put("leftValue", "")
+                                put("typeValidation", "loose")
+                            })
+                            put("conditions", buildJsonArray {
+                                add(buildJsonObject {
+                                    put("id", uuidShort())
+                                    put("leftValue", "={{ \$json.message.text }}")
+                                    put("rightValue", "/export")
+                                    put("operator", buildJsonObject {
+                                        put("type", "string")
+                                        put("operation", "startsWith")
+                                    })
+                                })
+                            })
+                            put("combinator", "and")
+                        })
+                        put("renameOutput", false)
+                        put("outputKey", "1")
+                    })
+                    add(buildJsonObject {
+                        put("conditions", buildJsonObject {
+                            put("options", buildJsonObject {
+                                put("caseSensitive", true)
+                                put("leftValue", "")
+                                put("typeValidation", "loose")
+                            })
+                            put("conditions", buildJsonArray {
+                                add(buildJsonObject {
+                                    put("id", uuidShort())
+                                    put("leftValue", "={{ \$json.message.text }}")
+                                    put("rightValue", "/list")
+                                    put("operator", buildJsonObject {
+                                        put("type", "string")
+                                        put("operation", "startsWith")
+                                    })
+                                })
+                            })
+                            put("combinator", "and")
+                        })
+                        put("renameOutput", false)
+                        put("outputKey", "2")
+                    })
+                    add(buildJsonObject {
+                        put("conditions", buildJsonObject {
+                            put("options", buildJsonObject {
+                                put("caseSensitive", true)
+                                put("leftValue", "")
+                                put("typeValidation", "loose")
+                            })
+                            put("conditions", buildJsonArray {
+                                add(buildJsonObject {
+                                    put("id", uuidShort())
+                                    put("leftValue", "={{ \$json.message.text }}")
+                                    put("rightValue", "/delete")
+                                    put("operator", buildJsonObject {
+                                        put("type", "string")
+                                        put("operation", "startsWith")
+                                    })
+                                })
+                            })
+                            put("combinator", "and")
+                        })
+                        put("renameOutput", false)
+                        put("outputKey", "3")
+                    })
+                    add(buildJsonObject {
+                        put("conditions", buildJsonObject {
+                            put("options", buildJsonObject {
+                                put("caseSensitive", true)
+                                put("leftValue", "")
+                                put("typeValidation", "loose")
+                            })
+                            put("conditions", buildJsonArray {
+                                add(buildJsonObject {
+                                    put("id", uuidShort())
+                                    put("leftValue", "={{ \$json.message.text }}")
+                                    put("rightValue", "/help")
+                                    put("operator", buildJsonObject {
+                                        put("type", "string")
+                                        put("operation", "startsWith")
+                                    })
+                                })
+                            })
+                            put("combinator", "and")
+                        })
+                        put("renameOutput", false)
+                        put("outputKey", "4")
                     })
                 })
             })
@@ -562,15 +654,49 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 "  const b64 = Buffer.from(csv, 'utf8').toString('base64');\n" +
                 "  return [{ json: { chatId, year, count: 0, fileName: 'expenses_' + year + '.csv' }, binary: { data: { data: b64, mimeType: 'text/csv', fileName: 'expenses_' + year + '.csv' } } }];\n" +
                 "}\n" +
+                "function csvEscape(val) {\n" +
+                "  const s = String(val ?? '');\n" +
+                "  if (s.includes(',') || s.includes('\"') || s.includes('\\n') || s.includes('\\r')) {\n" +
+                "    return '\"' + s.replace(/\"/g, '\"\"') + '\"';\n" +
+                "  }\n" +
+                "  return s;\n" +
+                "}\n" +
+                "function fmtNum(v) {\n" +
+                "  if (v === null || v === undefined) return '';\n" +
+                "  const n = parseFloat(v);\n" +
+                "  return isNaN(n) ? '' : n.toFixed(2);\n" +
+                "}\n" +
                 "const headers = ['id','createdAt','documentType','invoiceNumber','invoiceDate','dueDate','senderName','senderAddress','amountNet','amountVat','amountTotal','currency','notes'];\n" +
-                "const csvLines = [headers.join(';')];\n" +
-                "const q = String.fromCharCode(34);\n" +
+                "const csvLines = [headers.join(',')];\n" +
                 "for (const r of receipts) {\n" +
-                "  csvLines.push(headers.map(h => {\n" +
-                "    const v = r[h] ?? '';\n" +
-                "    const s = String(v).replace(new RegExp(q, 'g'), q + q);\n" +
-                "    return s.includes(';') || s.includes(q) ? q + s + q : s;\n" +
-                "  }).join(';'));\n" +
+                "  const net = parseFloat(r.amountNet);\n" +
+                "  const vat = parseFloat(r.amountVat);\n" +
+                "  let total = parseFloat(r.amountTotal);\n" +
+                "  if (!isNaN(net) && !isNaN(vat)) {\n" +
+                "    const calc = Math.round((net + vat) * 100) / 100;\n" +
+                "    if (isNaN(total) || (Math.abs(total - net) < 0.01 && vat > 0)) total = calc;\n" +
+                "  }\n" +
+                "  let senderName = r.senderName || '';\n" +
+                "  if (!senderName && r.senderAddress) {\n" +
+                "    const firstLine = r.senderAddress.split(/[\\n,]/).map(l => l.trim()).filter(l => l)[0];\n" +
+                "    if (firstLine) senderName = firstLine;\n" +
+                "  }\n" +
+                "  const row = {\n" +
+                "    id: r.id,\n" +
+                "    createdAt: r.createdAt,\n" +
+                "    documentType: r.documentType,\n" +
+                "    invoiceNumber: r.invoiceNumber,\n" +
+                "    invoiceDate: r.invoiceDate,\n" +
+                "    dueDate: r.dueDate,\n" +
+                "    senderName: senderName,\n" +
+                "    senderAddress: r.senderAddress,\n" +
+                "    amountNet: fmtNum(r.amountNet),\n" +
+                "    amountVat: fmtNum(r.amountVat),\n" +
+                "    amountTotal: fmtNum(total),\n" +
+                "    currency: r.currency,\n" +
+                "    notes: r.notes\n" +
+                "  };\n" +
+                "  csvLines.push(headers.map(h => csvEscape(row[h])).join(','));\n" +
                 "}\n" +
                 "const csv = csvLines.join('\\n');\n" +
                 "const b64 = Buffer.from(csv, 'utf8').toString('base64');\n" +
@@ -603,6 +729,198 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         })
     }
 
+
+    // Node 9d: Code – JSONL Dateien auflisten
+    val listFilesNode = buildJsonObject {
+        put("id", listFilesId)
+        put("name", "Dateien auflisten")
+        put("type", "n8n-nodes-base.code")
+        put("typeVersion", 2)
+        put("position", buildJsonArray { add(750); add(600) })
+        put("parameters", buildJsonObject {
+            put("language", "javaScript")
+            put("jsCode",
+                "const fs = require('fs');\n" +
+                "const path = require('path');\n" +
+                "const chatId = \$('Telegram Trigger').item.json.message.chat.id;\n" +
+                "const dir = '/home/node/.n8n/expenseTracker';\n" +
+                "if (!fs.existsSync(dir)) {\n" +
+                "  return [{ json: { chatId, text: 'Keine Belege gespeichert.' } }];\n" +
+                "}\n" +
+                "const files = fs.readdirSync(dir).filter(f => f.startsWith('receipts_') && f.endsWith('.jsonl')).sort();\n" +
+                "if (files.length === 0) {\n" +
+                "  return [{ json: { chatId, text: 'Keine Belege gespeichert.' } }];\n" +
+                "}\n" +
+                "const lines = files.map(f => {\n" +
+                "  const year = f.replace('receipts_', '').replace('.jsonl', '');\n" +
+                "  const content = fs.readFileSync(path.join(dir, f), 'utf8').trim();\n" +
+                "  const count = content ? content.split('\\n').filter(l => l).length : 0;\n" +
+                "  return f + ' - ' + count + ' Belege';\n" +
+                "});\n" +
+                "return [{ json: { chatId, text: 'Gespeicherte Belege:\\n\\n' + lines.join('\\n') } }];")
+        })
+    }
+
+    // Node 9e: Telegram – Liste senden
+    val listResponseNode = buildJsonObject {
+        put("id", listResponseId)
+        put("name", "Antwort: Liste")
+        put("type", "n8n-nodes-base.telegram")
+        put("typeVersion", 1.1)
+        put("position", buildJsonArray { add(1000); add(600) })
+        put("parameters", buildJsonObject {
+            put("operation", "sendMessage")
+            put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
+            put("text", "={{ \$('Dateien auflisten').item.json.text }}")
+            put("additionalFields", buildJsonObject {
+                put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+                put("appendAttribution", false)
+            })
+        })
+        put("credentials", buildJsonObject {
+            put("telegramApi", buildJsonObject {
+                put("id", credentialId)
+                put("name", "Telegram Bot")
+            })
+        })
+    }
+
+    // Node 9g: Code – JSONL Dateien löschen (mit Bestätigung)
+    val deleteFilesNode = buildJsonObject {
+        put("id", deleteFilesId)
+        put("name", "Dateien loeschen")
+        put("type", "n8n-nodes-base.code")
+        put("typeVersion", 2)
+        put("position", buildJsonArray { add(750); add(750) })
+        put("parameters", buildJsonObject {
+            put("language", "javaScript")
+            put("jsCode",
+                "const fs = require('fs');\n" +
+                "const path = require('path');\n" +
+                "const text = \$('Telegram Trigger').item.json.message.text || '';\n" +
+                "const parts = text.trim().split(/\\s+/);\n" +
+                "const year = parts[1] || '';\n" +
+                "const confirm = parts[2] || '';\n" +
+                "const chatId = \$('Telegram Trigger').item.json.message.chat.id;\n" +
+                "const dir = '/home/node/.n8n/expenseTracker';\n" +
+                "if (!year) {\n" +
+                "  return [{ json: { chatId, text: 'Usage: /delete <year> oder /delete all' } }];\n" +
+                "}\n" +
+                "if (confirm !== 'confirm') {\n" +
+                "  let filesToDelete = [];\n" +
+                "  if (year === 'all') {\n" +
+                "    if (fs.existsSync(dir)) {\n" +
+                "      filesToDelete = fs.readdirSync(dir).filter(f => f.startsWith('receipts_') && f.endsWith('.jsonl'));\n" +
+                "    }\n" +
+                "  } else {\n" +
+                "    const filePath = path.join(dir, 'receipts_' + year + '.jsonl');\n" +
+                "    if (fs.existsSync(filePath)) filesToDelete.push('receipts_' + year + '.jsonl');\n" +
+                "  }\n" +
+                "  if (filesToDelete.length === 0) {\n" +
+                "    return [{ json: { chatId, text: 'Keine Dateien fuer ' + year + ' gefunden.' } }];\n" +
+                "  }\n" +
+                "  return [{ json: { chatId, text: 'Warnung: Diese Dateien werden geloescht:\\n' + filesToDelete.join('\\n') + '\\n\\nSende /delete ' + year + ' confirm zum Bestaetigen.' } }];\n" +
+                "}\n" +
+                "let deleted = [];\n" +
+                "if (year === 'all') {\n" +
+                "  if (fs.existsSync(dir)) {\n" +
+                "    const files = fs.readdirSync(dir).filter(f => f.startsWith('receipts_') && f.endsWith('.jsonl'));\n" +
+                "    for (const f of files) {\n" +
+                "      fs.unlinkSync(path.join(dir, f));\n" +
+                "      deleted.push(f);\n" +
+                "    }\n" +
+                "  }\n" +
+                "} else {\n" +
+                "  const filePath = path.join(dir, 'receipts_' + year + '.jsonl');\n" +
+                "  if (fs.existsSync(filePath)) {\n" +
+                "    fs.unlinkSync(filePath);\n" +
+                "    deleted.push('receipts_' + year + '.jsonl');\n" +
+                "  }\n" +
+                "}\n" +
+                "return [{ json: { chatId, text: deleted.length ? 'Geloescht:\\n' + deleted.join('\\n') : 'Keine Dateien gefunden.' } }];")
+        })
+    }
+
+    // Node 9h: Telegram – Lösch-Ergebnis senden
+    val deleteResponseNode = buildJsonObject {
+        put("id", deleteResponseId)
+        put("name", "Antwort: Geloescht")
+        put("type", "n8n-nodes-base.telegram")
+        put("typeVersion", 1.1)
+        put("position", buildJsonArray { add(1000); add(750) })
+        put("parameters", buildJsonObject {
+            put("operation", "sendMessage")
+            put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
+            put("text", "={{ \$('Dateien loeschen').item.json.text }}")
+            put("additionalFields", buildJsonObject {
+                put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+                put("appendAttribution", false)
+            })
+        })
+        put("credentials", buildJsonObject {
+            put("telegramApi", buildJsonObject {
+                put("id", credentialId)
+                put("name", "Telegram Bot")
+            })
+        })
+    }
+
+    // Node 9i: Code – Hilfe-Text generieren
+    val helpNode = buildJsonObject {
+        put("id", helpNodeId)
+        put("name", "Hilfe generieren")
+        put("type", "n8n-nodes-base.code")
+        put("typeVersion", 2)
+        put("position", buildJsonArray { add(750); add(850) })
+        put("parameters", buildJsonObject {
+            put("language", "javaScript")
+            put("jsCode",
+                "const chatId = \$('Telegram Trigger').item.json.message.chat.id;\n" +
+                "const text = [\n" +
+                "  'Expense Tracker - Verfuegbare Befehle:',\n" +
+                "  '',\n" +
+                "  'Foto senden',\n" +
+                "  '  -> Kassenbon/Rechnung per OCR verarbeiten und speichern',\n" +
+                "  '',\n" +
+                "  '/export [Jahr]',\n" +
+                "  '  -> CSV-Export der Belege (default: aktuelles Jahr)',\n" +
+                "  '',\n" +
+                "  '/list',\n" +
+                "  '  -> Alle gespeicherten Beleg-Dateien anzeigen',\n" +
+                "  '',\n" +
+                "  '/delete <Jahr>  oder  /delete all',\n" +
+                "  '  -> Belege loeschen (erst Vorschau, dann /delete <Jahr> confirm)',\n" +
+                "  '',\n" +
+                "  'Beliebige Frage',\n" +
+                "  '  -> AI-Agent beantwortet Fragen zu deinen Ausgaben'\n" +
+                "].join('\\n');\n" +
+                "return [{ json: { chatId, text } }];")
+        })
+    }
+
+    // Node 9j: Telegram – Hilfe senden
+    val helpResponseNode = buildJsonObject {
+        put("id", helpResponseId)
+        put("name", "Antwort: Hilfe")
+        put("type", "n8n-nodes-base.telegram")
+        put("typeVersion", 1.1)
+        put("position", buildJsonArray { add(1000); add(850) })
+        put("parameters", buildJsonObject {
+            put("operation", "sendMessage")
+            put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
+            put("text", "={{ \$('Hilfe generieren').item.json.text }}")
+            put("additionalFields", buildJsonObject {
+                put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+                put("appendAttribution", false)
+            })
+        })
+        put("credentials", buildJsonObject {
+            put("telegramApi", buildJsonObject {
+                put("id", credentialId)
+                put("name", "Telegram Bot")
+            })
+        })
+    }
 
     // Node 10: AI Agent – beantwortet Fragen zu Ausgaben
     val aiAgentNode = buildJsonObject {
@@ -757,29 +1075,33 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         put("Telegram Trigger", buildJsonObject {
             put("main", buildJsonArray {
                 add(buildJsonArray {
-                    add(buildJsonObject { put("node", "Foto vorhanden?"); put("type", "main"); put("index", 0) })
+                    add(buildJsonObject { put("node", "Nachricht Switch"); put("type", "main"); put("index", 0) })
                 })
             })
         })
-        put("Foto vorhanden?", buildJsonObject {
+        put("Nachricht Switch", buildJsonObject {
             put("main", buildJsonArray {
-                // index 0 = true → Foto vorhanden → validating photo
+                // output 0 = Foto vorhanden → Validating photo
                 add(buildJsonArray {
                     add(buildJsonObject { put("node", "Antwort: Validating photo"); put("type", "main"); put("index", 0) })
                 })
-                // index 1 = false → kein Foto → Export-Kommando prüfen
-                add(buildJsonArray {
-                    add(buildJsonObject { put("node", "Export Kommando?"); put("type", "main"); put("index", 0) })
-                })
-            })
-        })
-        put("Export Kommando?", buildJsonObject {
-            put("main", buildJsonArray {
-                // index 0 = true → /export Kommando
+                // output 1 = /export
                 add(buildJsonArray {
                     add(buildJsonObject { put("node", "CSV Export"); put("type", "main"); put("index", 0) })
                 })
-                // index 1 = false → weder Foto noch Export → AI Agent
+                // output 2 = /list
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Dateien auflisten"); put("type", "main"); put("index", 0) })
+                })
+                // output 3 = /delete
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Dateien loeschen"); put("type", "main"); put("index", 0) })
+                })
+                // output 4 = /help
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Hilfe generieren"); put("type", "main"); put("index", 0) })
+                })
+                // output 5 = default → AI Agent
                 add(buildJsonArray {
                     add(buildJsonObject { put("node", "AI Agent"); put("type", "main"); put("index", 0) })
                 })
@@ -866,6 +1188,27 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 })
             })
         })
+        put("Dateien auflisten", buildJsonObject {
+            put("main", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Antwort: Liste"); put("type", "main"); put("index", 0) })
+                })
+            })
+        })
+        put("Dateien loeschen", buildJsonObject {
+            put("main", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Antwort: Geloescht"); put("type", "main"); put("index", 0) })
+                })
+            })
+        })
+        put("Hilfe generieren", buildJsonObject {
+            put("main", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Antwort: Hilfe"); put("type", "main"); put("index", 0) })
+                })
+            })
+        })
         // AI Agent → Antwort: Agent
         put("AI Agent", buildJsonObject {
             put("main", buildJsonArray {
@@ -902,9 +1245,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         name = "Expense Tracker",
         nodes = listOf(
             triggerNode,
-            ifPhotoNode,
             validatingNode,
-            noPhotoNode,
             getFileNode,
             downloadNode,
             toBase64Node,
@@ -916,9 +1257,15 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
             restoreBinaryNode,
             saveImageNode,
             jsonSaveNode,
-            isExportNode,
+            commandSwitchNode,
             exportCsvNode,
             sendCsvNode,
+            listFilesNode,
+            listResponseNode,
+            deleteFilesNode,
+            deleteResponseNode,
+            helpNode,
+            helpResponseNode,
             noReceiptAnswer,
             aiAgentNode,
             ollamaChatNode,

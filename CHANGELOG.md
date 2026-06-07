@@ -126,6 +126,65 @@ Benötigte Umgebungsvariablen im Stack:
 | `OLLAMA_BASE_URL` | Basis-URL für Ollama API (z.B. `http://ollama:11434`) |
 | `OLLAMA_AGENT_MODEL` | LLM-Modell für den AI Agent |
 
+## [2026-06-07] CSV Export Fixes, /list, /delete & Switch Node Refactoring
+
+### Geänderte Dateien
+
+- **TelegramReceiptWorkflow.kt** – CSV Export korrigiert, /list & /delete hinzugefügt, IF-Kette durch Switch Node ersetzt
+
+### Neuerungen im Detail
+
+#### 1. CSV Export – Fehlerbehebungen
+
+- **Trennzeichen:** `;` → `,` (echtes CSV statt Semikolon-CSV)
+- **Korrektes Quoting:** Felder mit `,`, `"` oder Zeilenumbrüchen werden in `"""` eingeschlossen (RFC 4180 kompatibel)
+- **`amountTotal` Berechnung:** Wenn OCR `amountTotal` gleich `amountNet` liefert obwohl `amountVat > 0`, wird `amountNet + amountVat` automatisch berechnet
+- **`senderName` Fallback:** Wenn OCR keinen Namen erkennt, wird die erste Zeile der `senderAddress` verwendet
+- **Zahlenformatierung:** Alle Beträge werden mit 2 Dezimalstellen formatiert (`6.74` statt `6.740000000001`)
+
+#### 2. Neue Telegram Kommandos
+
+| Kommando | Beschreibung |
+|----------|-------------|
+| `/list` | Zeigt alle gespeicherten `receipts_YYYY.jsonl`-Dateien mit Beleg-Anzahl pro Jahr |
+| `/delete <year>` | Löscht `receipts_<year>.jsonl` nach Bestätigung |
+| `/delete all` | Löscht **alle** JSONL-Dateien nach Bestätigung |
+| `/delete <year> confirm` | Bestätigt die Löschung |
+
+**Beispiel:**
+```
+User: /delete 2026
+Bot:  ⚠️ Bist du sicher? Diese Dateien werden gelöscht:
+      receipts_2026.jsonl
+
+      Sende /delete 2026 confirm um zu bestätigen.
+
+User: /delete 2026 confirm
+Bot:  ✅ Gelöscht:
+      receipts_2026.jsonl
+```
+
+#### 3. Switch Node Refactoring
+
+**Vorher (verkettete IF-Nodes):**
+```
+Foto vorhanden? → Export Kommando? → List Kommando? → Delete Kommando?
+```
+
+**Nachher (einzelner Switch Node):**
+```
+Nachricht Switch
+  Output 0: Foto vorhanden   → Bildverarbeitung
+  Output 1: /export           → CSV Export
+  Output 2: /list            → Dateien auflisten
+  Output 3: /delete          → Dateien löschen
+  Output 4: default           → AI Agent
+```
+
+- **4 Nodes gespart:** `Foto vorhanden?`, `Export Kommando?`, `List Kommando?`, `Delete Kommando?` entfernt
+- Klarere Routing-Logik: Ein Node statt verketteter IF-Branches
+- Default-Output (Output 4): Alle unbekannten Textnachrichten → AI Agent
+
 ## Nicht-committed Änderungen (Working Tree)
 
 - CSV-Pipeline komplett entfernt (8 Nodes → 3 Nodes)
@@ -134,6 +193,9 @@ Benötigte Umgebungsvariablen im Stack:
 - Code-Node für Bild speichern
 - Speicherpfad auf `/home/node/.n8n/expenseTracker/` geändert
 - `/export` Kommando mit CSV-Export
+- `/list` und `/delete` Kommandos mit Bestätigung
 - AI Agent mit Ollama, Tool-Calling und Memory
 - Reply-Kontext-Support im AI Agent
 - Steuernummer in Format OCR Ausgabe
+- CSV Export: Komma-Trennzeichen, korrektes Quoting, amountTotal/senderName Fixes
+- Switch Node statt IF-Kette für Nachrichten-Routing
