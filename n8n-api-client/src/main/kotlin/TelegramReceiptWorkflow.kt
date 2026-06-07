@@ -26,8 +26,10 @@ fun main() {
 
     // === KONFIGURATION ===
     val ollamaUrl = dotenv["OLLAMA_URL"] ?: System.getenv("OLLAMA_URL") ?: "http://ollama:11434/api/generate"
-    val ollamaModel = dotenv["OLLAMA_MODEL"] ?: System.getenv("OLLAMA_MODEL") ?: "moondream2"
+    val ollamaBaseUrl = dotenv["OLLAMA_BASE_URL"] ?: System.getenv("OLLAMA_BASE_URL") ?: "http://ollama:11434"
+    val ollamaModel = dotenv["OLLAMA_MODEL"] ?: System.getenv("OLLAMA_MODEL") ?: "qwen3-vl:4b"
     val ocrModel = dotenv["OLLAMA_OCR_MODEL"] ?: System.getenv("OLLAMA_OCR_MODEL") ?: "deepseek-ocr:latest"
+    val agentModel = dotenv["OLLAMA_AGENT_MODEL"] ?: System.getenv("OLLAMA_AGENT_MODEL") ?: "Keyvan/german-text-3.1:latest"
     // =====================
 
     val client = N8nClient(baseUrl = n8nUrl, apiKey = apiKey)
@@ -37,6 +39,10 @@ fun main() {
             println("Erstelle Telegram Credential...")
             val credentialId = client.findOrCreateTelegramCredential(botToken)
             println("✅ Credential erstellt: $credentialId")
+
+            println("Erstelle Ollama Credential...")
+            val ollamaCredentialId = client.findOrCreateOllamaCredential(ollamaBaseUrl)
+            println("✅ Ollama Credential: $ollamaCredentialId")
 
             val workflowName = "Expense Tracker"
             println("Prüfe auf vorhandenen Workflow '$workflowName'...")
@@ -48,7 +54,7 @@ fun main() {
             }
 
             println("Erstelle neuen Workflow...")
-            val workflow = buildReceiptValidationWorkflow(credentialId, ollamaUrl, ollamaModel, ocrModel, botToken)
+            val workflow = buildReceiptValidationWorkflow(credentialId, ollamaCredentialId, ollamaUrl, ollamaModel, ocrModel, agentModel, botToken)
             val created = client.createFullWorkflow(workflow)
             println("✅ Workflow erstellt: [${created.id}] ${created.name}")
 
@@ -72,7 +78,7 @@ fun main() {
     }
 }
 
-fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, model: String, ocrModel: String, botToken: String): WorkflowCreateRequest {
+fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: String, ollamaUrl: String, model: String, ocrModel: String, agentModel: String, botToken: String): WorkflowCreateRequest {
     val triggerId       = uuidShort()
     val ifPhotoId       = uuidShort()
     val validatingId    = uuidShort()
@@ -92,6 +98,15 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
     val isExportId      = uuidShort()
     val exportCsvId     = uuidShort()
     val sendCsvId       = uuidShort()
+    val aiAgentId       = uuidShort()
+    val ollamaChatId    = uuidShort()
+    val agentToolId     = uuidShort()
+    val exportToolId    = uuidShort()
+    val agentMemoryId   = uuidShort()
+    val agentResponseId = uuidShort()
+    val agentRouterId   = uuidShort()
+    val agentPrepareId  = uuidShort()
+    val agentSendCsvId  = uuidShort()
 
     // Node 1: Telegram Trigger
     val triggerNode = buildJsonObject {
@@ -156,17 +171,17 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
         })
     }
 
-    // Node 4: Kein Bild → Telegram Antwort (false branch)
+    // Node 4: Kein Bild → Telegram Antwort (fallback wenn Agent fehlschlägt)
     val noPhotoNode = buildJsonObject {
         put("id", noPhotoId)
         put("name", "Antwort: Kein Bild")
         put("type", "n8n-nodes-base.telegram")
         put("typeVersion", 1.1)
-        put("position", buildJsonArray { add(750); add(500) })
+        put("position", buildJsonArray { add(1250); add(700) })
         put("parameters", buildJsonObject {
             put("operation", "sendMessage")
             put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
-            put("text", "Bitte sende ein Bild von deinem Kassenbon oder deiner Rechnung.")
+            put("text", "Bitte sende ein Bild von deinem Kassenbon oder deiner Rechnung, oder stelle mir eine Frage zu deinen Ausgaben.")
             put("additionalFields", buildJsonObject {
                 put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
                 put("appendAttribution", false)
@@ -285,6 +300,8 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
                 "  const lines = [];\n" +
                 "  if (data.sender?.name) lines.push(data.sender.name);\n" +
                 "  if (data.sender?.address) lines.push(data.sender.address);\n" +
+                "  const vatId = data.sender?.vat_id || data.sender?.vatid || '';\n" +
+                "  if (vatId) lines.push('Steuernummer: ' + vatId);\n" +
                 "  const date = data.invoice_date || data.invoicedate;\n" +
                 "  if (date) lines.push('Datum: ' + date);\n" +
                 "  const nr = data.invoice_number || data.invoicenumber;\n" +
@@ -576,6 +593,262 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
     }
 
 
+    // Node 10: AI Agent – beantwortet Fragen zu Ausgaben
+    val aiAgentNode = buildJsonObject {
+        put("id", aiAgentId)
+        put("name", "AI Agent")
+        put("type", "@n8n/n8n-nodes-langchain.agent")
+        put("typeVersion", 2)
+        put("position", buildJsonArray { add(750); add(700) })
+        put("parameters", buildJsonObject {
+            put("promptType", "define")
+            put("text", "={{ (() => { const msg = \$('Telegram Trigger').item.json.message; const reply = msg.reply_to_message; let prompt = msg.text || ''; if (reply && reply.text) { prompt = '[Referenzierte Nachricht]:\\n' + reply.text + '\\n\\n[Meine Frage]:\\n' + prompt; } return prompt; })() }}")
+            put("options", buildJsonObject {
+                put("systemMessage", "Du bist ein hilfreicher Ausgaben-Assistent. Du hilfst dem Benutzer, seine Ausgaben zu analysieren. " +
+                    "Du kannst nach Belegen suchen, Zusammenfassungen erstellen und Fragen zu gespeicherten Ausgaben beantworten. " +
+                    "Antworte immer auf Deutsch und sei präzise. Wenn du keine relevanten Daten findest, sage das ehrlich. " +
+                    "Verwende das Tool 'search_expenses' um nach Belegen zu suchen. " +
+                    "Verwende das Tool 'export_csv' wenn der Benutzer einen CSV-Export seiner Belege möchte. Du kannst optional ein Jahr als Parameter übergeben. WICHTIG: Wenn das export_csv Tool einen Dateipfad zurückgibt, gib diesen Pfad EXAKT und UNVERÄNDERT in deiner Antwort wieder, damit die Datei automatisch gesendet werden kann. " +
+                    "Wenn der Benutzer auf eine vorherige Nachricht antwortet (Reply), wird diese als '[Referenzierte Nachricht]' mitgeliefert. Beziehe dich darauf in deiner Antwort.")
+            })
+        })
+    }
+
+    // Node 10a: Ollama Chat Model (Sub-Node für AI Agent)
+    val ollamaChatNode = buildJsonObject {
+        put("id", ollamaChatId)
+        put("name", "Ollama Chat Model")
+        put("type", "@n8n/n8n-nodes-langchain.lmChatOllama")
+        put("typeVersion", 1)
+        put("position", buildJsonArray { add(650); add(900) })
+        put("parameters", buildJsonObject {
+            put("model", agentModel)
+            put("options", buildJsonObject {})
+        })
+        put("credentials", buildJsonObject {
+            put("ollamaApi", buildJsonObject {
+                put("id", ollamaCredentialId)
+                put("name", "Ollama (Auto)")
+            })
+        })
+    }
+
+    // Node 10b: Tool – Ausgaben durchsuchen (Code Tool)
+    val agentToolNode = buildJsonObject {
+        put("id", agentToolId)
+        put("name", "search_expenses")
+        put("type", "@n8n/n8n-nodes-langchain.toolCode")
+        put("typeVersion", 1.2)
+        put("position", buildJsonArray { add(850); add(900) })
+        put("parameters", buildJsonObject {
+            put("name", "search_expenses")
+            put("description", "Durchsucht gespeicherte Kassenbelege und Rechnungen. " +
+                "Input ist eine Suchanfrage (z.B. Geschäftsname, Monat, Jahr, Betrag). " +
+                "Gibt eine Liste passender Belege mit Datum, Geschäft, Betrag und Artikeln zurück.")
+            put("jsCode",
+                "const fs = require('fs');\n" +
+                "const path = require('path');\n" +
+                "const query = \$input.item.json.query || \$input.item.json.chatInput || '';\n" +
+                "const dir = '/home/node/.n8n/expenseTracker';\n" +
+                "const years = [new Date().getFullYear(), new Date().getFullYear() - 1];\n" +
+                "let allReceipts = [];\n" +
+                "for (const year of years) {\n" +
+                "  const filePath = path.join(dir, 'receipts_' + year + '.jsonl');\n" +
+                "  if (fs.existsSync(filePath)) {\n" +
+                "    const lines = fs.readFileSync(filePath, 'utf8').trim().split('\\n').filter(l => l);\n" +
+                "    allReceipts = allReceipts.concat(lines.map(l => JSON.parse(l)));\n" +
+                "  }\n" +
+                "}\n" +
+                "const q = query.toLowerCase();\n" +
+                "let filtered = allReceipts;\n" +
+                "if (q) {\n" +
+                "  filtered = allReceipts.filter(r => {\n" +
+                "    const text = [r.senderName, r.senderAddress, r.invoiceDate, r.notes, \n" +
+                "      (r.lineItems || []).map(i => i.description).join(' ')].join(' ').toLowerCase();\n" +
+                "    return q.split(' ').some(word => text.includes(word));\n" +
+                "  });\n" +
+                "}\n" +
+                "const results = filtered.slice(0, 10).map(r => ({\n" +
+                "  datum: r.invoiceDate || r.createdAt?.substring(0, 10) || 'unbekannt',\n" +
+                "  geschaeft: r.senderName || 'unbekannt',\n" +
+                "  betrag: r.amountTotal ? r.amountTotal.toFixed(2) + ' ' + (r.currency || 'EUR') : 'unbekannt',\n" +
+                "  artikel: (r.lineItems || []).slice(0, 5).map(i => i.description).join(', ')\n" +
+                "}));\n" +
+                "const summary = 'Gefunden: ' + filtered.length + ' Belege (zeige max. 10).\\n' +\n" +
+                "  'Gesamtsumme: ' + filtered.reduce((s, r) => s + (r.amountTotal || 0), 0).toFixed(2) + ' EUR\\n\\n' +\n" +
+                "  results.map((r, i) => (i+1) + '. ' + r.datum + ' | ' + r.geschaeft + ' | ' + r.betrag + (r.artikel ? ' (' + r.artikel + ')' : '')).join('\\n');\n" +
+                "return summary;")
+        })
+    }
+
+    // Node 10b2: Tool – CSV Export (Code Tool)
+    val exportToolNode = buildJsonObject {
+        put("id", exportToolId)
+        put("name", "export_csv")
+        put("type", "@n8n/n8n-nodes-langchain.toolCode")
+        put("typeVersion", 1.2)
+        put("position", buildJsonArray { add(950); add(1050) })
+        put("parameters", buildJsonObject {
+            put("name", "export_csv")
+            put("description", "Exportiert Kassenbelege als CSV-Datei. " +
+                "Input als JSON-String mit optionalen Feldern: year (z.B. '2025'), filter (Geschäftsname z.B. 'REWE'). " +
+                "Beispiel: {\"year\":\"2026\",\"filter\":\"REWE\"} oder {\"year\":\"2025\"} oder {} für alles im aktuellen Jahr. " +
+                "Gibt den Dateipfad der erzeugten CSV zurück.")
+            put("jsCode",
+                "const fs = require('fs');\n" +
+                "const path = require('path');\n" +
+                "const raw = (\$input.item.json.query || \$input.item.json.chatInput || '').trim();\n" +
+                "let params = {};\n" +
+                "try { params = JSON.parse(raw); } catch(e) {\n" +
+                "  const ym = raw.match(/\\d{4}/);\n" +
+                "  if (ym) params.year = ym[0];\n" +
+                "  if (raw && !ym) params.filter = raw;\n" +
+                "}\n" +
+                "const year = params.year || new Date().getFullYear().toString();\n" +
+                "const filterStr = (params.filter || '').toLowerCase().trim();\n" +
+                "const dir = '/home/node/.n8n/expenseTracker';\n" +
+                "const exportDir = path.join(dir, 'exports');\n" +
+                "if (!fs.existsSync(exportDir)) fs.mkdirSync(exportDir, { recursive: true });\n" +
+                "const filePath = path.join(dir, 'receipts_' + year + '.jsonl');\n" +
+                "let receipts = [];\n" +
+                "if (fs.existsSync(filePath)) {\n" +
+                "  const lines = fs.readFileSync(filePath, 'utf8').trim().split('\\n').filter(l => l);\n" +
+                "  receipts = lines.map(l => JSON.parse(l));\n" +
+                "}\n" +
+                "if (filterStr) {\n" +
+                "  receipts = receipts.filter(r => (r.senderName || '').toLowerCase().includes(filterStr));\n" +
+                "}\n" +
+                "if (receipts.length === 0) {\n" +
+                "  const what = filterStr ? filterStr + ' im Jahr ' + year : 'Jahr ' + year;\n" +
+                "  return 'Keine Belege fuer ' + what + ' vorhanden.';\n" +
+                "}\n" +
+                "const safeName = filterStr ? filterStr.replace(/[^a-z0-9]/g,'_') + '_' + year : year;\n" +
+                "const headers = ['id','createdAt','documentType','invoiceNumber','invoiceDate','senderName','senderAddress','amountNet','amountVat','amountTotal','currency','notes'];\n" +
+                "const q = String.fromCharCode(34);\n" +
+                "const csvLines = [headers.join(';')];\n" +
+                "for (const r of receipts) {\n" +
+                "  csvLines.push(headers.map(h => {\n" +
+                "    const v = r[h] ?? '';\n" +
+                "    const s = String(v).replace(new RegExp(q, 'g'), q + q);\n" +
+                "    return s.includes(';') || s.includes(q) ? q + s + q : s;\n" +
+                "  }).join(';'));\n" +
+                "}\n" +
+                "const csv = csvLines.join('\\n');\n" +
+                "const csvPath = path.join(exportDir, 'expenses_' + safeName + '.csv');\n" +
+                "fs.writeFileSync(csvPath, csv, 'utf8');\n" +
+                "return 'CSV erstellt: ' + csvPath + ' (' + receipts.length + ' Belege' + (filterStr ? ' fuer ' + filterStr : '') + ', Jahr ' + year + ')';")
+        })
+    }
+
+    // Node 10c: Window Buffer Memory (per chatId)
+    val agentMemoryNode = buildJsonObject {
+        put("id", agentMemoryId)
+        put("name", "Window Buffer Memory")
+        put("type", "@n8n/n8n-nodes-langchain.memoryBufferWindow")
+        put("typeVersion", 1.2)
+        put("position", buildJsonArray { add(1050); add(900) })
+        put("parameters", buildJsonObject {
+            put("sessionIdType", "customKey")
+            put("sessionKey", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
+            put("contextWindowLength", 10)
+        })
+    }
+
+    // Node 10d: IF – CSV erzeugt?
+    val agentIfCsvNode = buildJsonObject {
+        put("id", agentRouterId)
+        put("name", "CSV erzeugt?")
+        put("type", "n8n-nodes-base.if")
+        put("typeVersion", 1)
+        put("position", buildJsonArray { add(1000); add(700) })
+        put("parameters", buildJsonObject {
+            put("conditions", buildJsonObject {
+                put("string", buildJsonArray {
+                    add(buildJsonObject {
+                        put("value1", "={{ \$json.output }}")
+                        put("operation", "contains")
+                        put("value2", "/expenseTracker/exports/")
+                    })
+                })
+            })
+        })
+    }
+
+    // Node 10e: CSV vorbereiten (nur bei true-Branch)
+    val agentPrepareCsvNode = buildJsonObject {
+        put("id", agentPrepareId)
+        put("name", "CSV vorbereiten")
+        put("type", "n8n-nodes-base.code")
+        put("typeVersion", 2)
+        put("position", buildJsonArray { add(1250); add(600) })
+        put("parameters", buildJsonObject {
+            put("language", "javaScript")
+            put("jsCode",
+                "const fs = require('fs');\n" +
+                "const output = \$input.first().json.output || '';\n" +
+                "const pathMatch = output.match(/(\\/home\\/[^\\s]+\\.csv)/);\n" +
+                "if (!pathMatch || !fs.existsSync(pathMatch[1])) {\n" +
+                "  return [{ json: { text: output } }];\n" +
+                "}\n" +
+                "const csvPath = pathMatch[1];\n" +
+                "const textPart = output.replace(csvPath, '').trim();\n" +
+                "const csvData = fs.readFileSync(csvPath, 'utf8');\n" +
+                "const b64 = Buffer.from(csvData, 'utf8').toString('base64');\n" +
+                "const fileName = csvPath.split('/').pop();\n" +
+                "return [{ json: { text: textPart || fileName, fileName }, binary: { data: { data: b64, mimeType: 'text/csv', fileName } } }];")
+        })
+    }
+
+    // Node 10f: Agent Antwort als Text senden (false branch)
+    val agentResponseNode = buildJsonObject {
+        put("id", agentResponseId)
+        put("name", "Antwort: Agent")
+        put("type", "n8n-nodes-base.telegram")
+        put("typeVersion", 1.1)
+        put("position", buildJsonArray { add(1250); add(800) })
+        put("parameters", buildJsonObject {
+            put("operation", "sendMessage")
+            put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
+            put("text", "={{ \$json.output }}")
+            put("additionalFields", buildJsonObject {
+                put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+                put("appendAttribution", false)
+            })
+        })
+        put("credentials", buildJsonObject {
+            put("telegramApi", buildJsonObject {
+                put("id", credentialId)
+                put("name", "Telegram Bot")
+            })
+        })
+    }
+
+    // Node 10g: Agent CSV als Datei senden (true branch)
+    val agentSendCsvNode = buildJsonObject {
+        put("id", agentSendCsvId)
+        put("name", "Agent CSV senden")
+        put("type", "n8n-nodes-base.telegram")
+        put("typeVersion", 1.1)
+        put("position", buildJsonArray { add(1500); add(600) })
+        put("parameters", buildJsonObject {
+            put("operation", "sendDocument")
+            put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
+            put("binaryData", true)
+            put("binaryPropertyName", "data")
+            put("additionalFields", buildJsonObject {
+                put("caption", "={{ \$json.text }}")
+                put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
+                put("appendAttribution", false)
+            })
+        })
+        put("credentials", buildJsonObject {
+            put("telegramApi", buildJsonObject {
+                put("id", credentialId)
+                put("name", "Telegram Bot")
+            })
+        })
+    }
+
     // Node 8e: Kein Kassenbon (false branch)
     val noReceiptAnswer = buildJsonObject {
         put("id", noReceiptId)
@@ -626,9 +899,9 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
                 add(buildJsonArray {
                     add(buildJsonObject { put("node", "CSV Export"); put("type", "main"); put("index", 0) })
                 })
-                // index 1 = false → weder Foto noch Export
+                // index 1 = false → weder Foto noch Export → AI Agent
                 add(buildJsonArray {
-                    add(buildJsonObject { put("node", "Antwort: Kein Bild"); put("type", "main"); put("index", 0) })
+                    add(buildJsonObject { put("node", "AI Agent"); put("type", "main"); put("index", 0) })
                 })
             })
         })
@@ -713,6 +986,63 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
                 })
             })
         })
+        // AI Agent → CSV erzeugt?
+        put("AI Agent", buildJsonObject {
+            put("main", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "CSV erzeugt?"); put("type", "main"); put("index", 0) })
+                })
+            })
+        })
+        // CSV erzeugt? → true: CSV vorbereiten → Agent CSV senden
+        put("CSV erzeugt?", buildJsonObject {
+            put("main", buildJsonArray {
+                // index 0 = true → CSV vorbereiten
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "CSV vorbereiten"); put("type", "main"); put("index", 0) })
+                })
+                // index 1 = false → Text-Antwort
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Antwort: Agent"); put("type", "main"); put("index", 0) })
+                })
+            })
+        })
+        put("CSV vorbereiten", buildJsonObject {
+            put("main", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Agent CSV senden"); put("type", "main"); put("index", 0) })
+                })
+            })
+        })
+        // Sub-Node Connections (ai_languageModel, ai_tool, ai_memory → AI Agent)
+        put("Ollama Chat Model", buildJsonObject {
+            put("ai_languageModel", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "AI Agent"); put("type", "ai_languageModel"); put("index", 0) })
+                })
+            })
+        })
+        put("search_expenses", buildJsonObject {
+            put("ai_tool", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "AI Agent"); put("type", "ai_tool"); put("index", 0) })
+                })
+            })
+        })
+        put("export_csv", buildJsonObject {
+            put("ai_tool", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "AI Agent"); put("type", "ai_tool"); put("index", 0) })
+                })
+            })
+        })
+        put("Window Buffer Memory", buildJsonObject {
+            put("ai_memory", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "AI Agent"); put("type", "ai_memory"); put("index", 0) })
+                })
+            })
+        })
     }
 
     return WorkflowCreateRequest(
@@ -736,7 +1066,16 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaUrl: String, mode
             isExportNode,
             exportCsvNode,
             sendCsvNode,
-            noReceiptAnswer
+            noReceiptAnswer,
+            aiAgentNode,
+            ollamaChatNode,
+            agentToolNode,
+            exportToolNode,
+            agentMemoryNode,
+            agentIfCsvNode,
+            agentPrepareCsvNode,
+            agentResponseNode,
+            agentSendCsvNode
         ),
         connections = connections,
         settings = buildJsonObject {

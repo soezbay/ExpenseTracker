@@ -6,9 +6,12 @@ Automatisierte Kassenbon-Verarbeitung via Telegram und lokale OCR-Modell-Integra
 
 **Stack:**
 - **n8n** (Workflow-Automation) – läuft auf `https://n8n.sozbay.dev`
-- **Telegram Bot** – empfängt Kassenbon-Fotos
-- **Ollama** – lokale Vision/OCR-Modelle (`deepseek-ocr`, `Keyvan/german-ocr-3`)
+- **Telegram Bot** – empfängt Kassenbon-Fotos & Textfragen
+- **Ollama** – lokale Vision/OCR-Modelle + AI Agent LLM
+  - OCR: `Keyvan/german-ocr-3:latest`
+  - Agent: `Keyvan/german-text-3.1:latest`
 - **Kotlin** – n8n API Client & Workflow-Builder
+- **n8n AI Agent** – LangChain-basierter Agent mit Tool-Calling & Memory
 
 **Stack yaml:**
 ```version: '3.8'
@@ -100,6 +103,7 @@ volumes:
 ### ✅ Abgeschlossen
 - [x] n8n API Client in Kotlin erstellt
 - [x] Telegram Credential in n8n konfiguriert (auto-created via API)
+- [x] Ollama Credential in n8n konfiguriert (auto-created via API)
 - [x] Workflow-Builder für Kassenbon-Verarbeitung
 - [x] OCR-Integration mit dynamischer Prompt-Selektion
 - [x] JSON → lesbarer Text Formatierung via Code-Node
@@ -108,9 +112,13 @@ volumes:
 - [x] Bilder lokal mit eindeutigem Dateinamen speichern (`fs.writeFileSync`)
 - [x] Persistenz via JSONL (append-only, multi-user-sicher)
 - [x] `/export` Kommando – CSV-Export per Telegram Chat
+- [x] AI Agent Integration (Ollama `Keyvan/german-text-3.1:latest`)
+- [x] Tool-Calling: `search_expenses` – durchsucht JSONL-Belege
+- [x] Window Buffer Memory – Konversations-Kontext per Chat-ID
 
 ### ⏳ Ausstehend
 - [ ] Kategorisierung der Artikel hinzufügen
+- [ ] Weitere Agent-Tools (z.B. Ausgaben-Statistiken, Monatsvergleich)
 - [ ] Git Repository pushen
 
 ---
@@ -128,13 +136,20 @@ TELEGRAM_BOT_TOKEN=dein_telegram_bot_token_hier
 
 # Ollama (fuer Docker-Stack: Service-Namen verwenden)
 OLLAMA_URL=http://ollama:11434/api/generate
+OLLAMA_BASE_URL=http://ollama:11434
 OLLAMA_MODEL=qwen3-vl:4b
 OLLAMA_OCR_MODEL=Keyvan/german-ocr-3:latest
+
+# AI Agent Model (Chat/Text Model für Ausgaben-Assistent)
+OLLAMA_AGENT_MODEL=Keyvan/german-text-3.1:latest
 ```
 
 **Unterstützte OCR-Modelle:**
 - `Keyvan/german-ocr-3` – **Empfohlen** für deutsche Rechnungen (strukturiertes JSON)
 - `deepseek-ocr:latest` – Allgemeine OCR (Markdown/Plaintext)
+
+**Agent-Modell:**
+- `Keyvan/german-text-3.1:latest` – Deutsches Text-Modell mit Tool-Calling-Support
 
 ---
 
@@ -149,9 +164,9 @@ Telegram Trigger
     | Ja                          | Nein
     |                         [Export Kommando?]
     |                           | Ja        | Nein
-    |                       CSV Export    Antwort: Kein Bild
-    |                           |
-    |                       CSV senden
+    |                       CSV Export    AI Agent
+    |                           |            |
+    |                       CSV senden    Antwort: Agent
     |
 Antwort: "Validating photo.."
     |
@@ -166,6 +181,27 @@ Format OCR + Restore Binary (parallel)
     |              |
 Antwort: OCR   Bild speichern → JSON speichern
 ```
+
+### AI Agent Flow
+
+User sendet eine Textnachricht (kein Foto, kein `/export`) → AI Agent antwortet.
+
+```
+Export Kommando? → false
+    |
+  AI Agent (Keyvan/german-text-3.1:latest)
+    ├── Ollama Chat Model (LLM)
+    ├── search_expenses Tool (JSONL-Suche)
+    └── Window Buffer Memory (per chatId, 10 Nachrichten)
+    |
+  Antwort: Agent → Telegram sendMessage
+```
+
+**Fähigkeiten:**
+- Belege nach Geschäft, Datum, Betrag oder Artikeln durchsuchen
+- Zusammenfassungen erstellen (Gesamtausgaben, Top-Geschäfte)
+- Fragen zu gespeicherten Ausgaben beantworten
+- Konversations-Kontext über mehrere Nachrichten merken
 
 ### Export-Flow
 
@@ -184,6 +220,11 @@ User sendet `/export` oder `/export 2025` → Bot antwortet mit CSV-Datei.
 | **Export Kommando?** | IF | Prüft ob Text mit `/export` beginnt |
 | **CSV Export** | Code | Liest JSONL, filtert nach User, generiert CSV |
 | **CSV senden** | Telegram | Sendet CSV als Dokument |
+| **AI Agent** | LangChain Agent | Beantwortet Fragen zu Ausgaben via Ollama |
+| **Ollama Chat Model** | LLM Sub-Node | `Keyvan/german-text-3.1:latest` |
+| **search_expenses** | Tool Code | Durchsucht JSONL-Belege nach Suchbegriffen |
+| **Window Buffer Memory** | Memory Sub-Node | Speichert Konversations-Kontext (10 Nachrichten pro Chat) |
+| **Antwort: Agent** | Telegram | Sendet Agent-Antwort als Reply |
 | **Telegram getFile** | HTTP | `getFile` API → `file_path` |
 | **Bild herunterladen** | HTTP | Binary-Download via `file_path` |
 | **Zu Base64** | Code | Binary → Base64 + `chatId`, `messageId`, `receiptId` |
@@ -221,6 +262,7 @@ cd n8n-api-client
 **Output:**
 ```
 ✅ Credential erstellt: <credential-id>
+✅ Ollama Credential: <ollama-credential-id>
 ✅ Alten Workflow geloescht.
 ✅ Workflow erstellt: [<workflow-id>] Expense Tracker
 ```
@@ -336,8 +378,9 @@ git push origin main
 ## Nächste Schritte
 
 1. **Artikel-Kategorisierung** → Zweites LLM-Call für Kategorien
-2. **Git pushen** → Repository aktualisieren
-3. **Dashboard** → Web-UI für Auswertungen
+2. **Weitere Agent-Tools** → Monatsvergleich, Top-Ausgaben, Budgetwarnungen
+3. **Git pushen** → Repository aktualisieren
+4. **Dashboard** → Web-UI für Auswertungen
 
 ---
 
@@ -361,4 +404,4 @@ ExpenseTracker/
 
 ---
 
-**Zuletzt aktualisiert:** 2026-06-04 23:25 UTC+02:00
+**Zuletzt aktualisiert:** 2026-06-07 19:22 UTC+02:00

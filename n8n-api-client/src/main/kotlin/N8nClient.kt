@@ -138,6 +138,31 @@ class N8nClient(
         return credential.id
     }
 
+    suspend fun findOrCreateOllamaCredential(ollamaBaseUrl: String): String {
+        val credentialName = "Ollama (Auto)"
+        val listResponse: HttpResponse = client.get("${apiBase}credentials")
+        if (listResponse.status.isSuccess()) {
+            val existing = handleResponse<CredentialListResponse>(listResponse)
+                .data.find { it.name == credentialName }
+            if (existing != null) {
+                println("Vorhandenes Ollama Credential gefunden: ${existing.id}")
+                return existing.id
+            }
+        }
+        val request = CredentialCreateRequest(
+            name = credentialName,
+            type = "ollamaApi",
+            data = buildJsonObject {
+                put("baseUrl", JsonPrimitive(ollamaBaseUrl))
+            }
+        )
+        val response: HttpResponse = client.post("${apiBase}credentials") {
+            setBody(request)
+        }
+        val credential = handleResponse<CredentialResponse>(response)
+        return credential.id
+    }
+
     // --- Executions ---
 
     suspend fun listExecutions(): List<Execution> {
