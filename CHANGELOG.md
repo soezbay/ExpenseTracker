@@ -80,6 +80,52 @@ Benötigte Umgebungsvariablen im Stack:
 - Sendet als Telegram-Dokument
 - Bei 0 Belegen: CSV mit Hinweistext
 
+---
+
+## [2026-06-07] AI Agent & Format-Erweiterungen
+
+### Geänderte Dateien
+
+- **TelegramReceiptWorkflow.kt** – AI Agent Branch, Format OCR Erweiterungen
+- **N8nClient.kt** – `findOrCreateOllamaCredential` hinzugefügt
+- **AGENT.md** – Dokumentation aktualisiert
+- **.env.example** – `OLLAMA_BASE_URL`, `OLLAMA_AGENT_MODEL` ergänzt
+
+### Neuerungen im Detail
+
+#### 1. AI Agent Integration
+
+- Textnachrichten (kein Foto, kein `/export`) werden an einen n8n AI Agent weitergeleitet
+- LLM: `Keyvan/german-text-3.1:latest` via Ollama Chat Model Sub-Node
+- Tool-Calling: `search_expenses` durchsucht JSONL-Belege (aktuelle + Vorjahr) nach Suchbegriffen
+- Window Buffer Memory: Konversations-Kontext (10 Nachrichten pro Chat-ID)
+- Agent-Antwort wird als Telegram-Reply gesendet
+
+#### 2. Reply-Kontext (Telegram Reply)
+
+- Antwortet der User auf eine Nachricht (Telegram Reply), wird `message.reply_to_message.text` automatisch im Prompt mitgeliefert
+- Prompt-Format:
+  ```
+  [Referenzierte Nachricht]:
+  <Text der referenzierten Nachricht>
+
+  [Meine Frage]:
+  <Eigene Nachricht des Users>
+  ```
+- System-Prompt des Agents informiert ihn über dieses Format
+
+#### 3. Format OCR – Steuernummer ergänzt
+
+- `sender.vat_id` / `sender.vatid` wird jetzt in der Telegram-Ausgabe angezeigt
+- Reihenfolge: Name → Adresse → **Steuernummer** → Datum → Beleg-Nr → Artikel → Gesamt → MwSt
+
+#### 4. Neue Umgebungsvariablen
+
+| Variable | Beschreibung |
+|----------|-------------|
+| `OLLAMA_BASE_URL` | Basis-URL für Ollama API (z.B. `http://ollama:11434`) |
+| `OLLAMA_AGENT_MODEL` | LLM-Modell für den AI Agent |
+
 ## Nicht-committed Änderungen (Working Tree)
 
 - CSV-Pipeline komplett entfernt (8 Nodes → 3 Nodes)
@@ -88,3 +134,6 @@ Benötigte Umgebungsvariablen im Stack:
 - Code-Node für Bild speichern
 - Speicherpfad auf `/home/node/.n8n/expenseTracker/` geändert
 - `/export` Kommando mit CSV-Export
+- AI Agent mit Ollama, Tool-Calling und Memory
+- Reply-Kontext-Support im AI Agent
+- Steuernummer in Format OCR Ausgabe

@@ -58,14 +58,29 @@ fun main() {
             val created = client.createFullWorkflow(workflow)
             println("✅ Workflow erstellt: [${created.id}] ${created.name}")
 
+            println("Prüfe auf vorhandenen Error Workflow...")
+            val errorWorkflowName = "Expense Tracker - Error Handler"
+            val existingError = client.listWorkflows().find { it.name == errorWorkflowName }
+            if (existingError != null) {
+                println("Gefunden [${existingError.id}]. Lösche alten Error Workflow...")
+                client.deleteWorkflow(existingError.id!!)
+                println("✅ Alten Error Workflow gelöscht.")
+            }
+
+            println("Erstelle Error Workflow...")
+            val errorWorkflow = buildErrorWorkflow(credentialId)
+            val errorCreated = client.createFullWorkflow(errorWorkflow)
+            println("✅ Error Workflow erstellt: [${errorCreated.id}] ${errorCreated.name}")
+
             println("""
 
-                📋 Workflow erstellt (INAKTIV).
+                📋 Workflows erstellt (INAKTIV).
                 Zum Testen in n8n UI:
-                1. Workflow öffnen
+                1. "Expense Tracker" Workflow öffnen
                 2. Auf "Execute Workflow" klicken
                 3. Bild an Telegram Bot senden
                 4. Nach erfolgreichem Test: Workflow aktivieren (Toggle oben rechts)
+                5. "Expense Tracker - Error Handler" Workflow aktivieren (fängt globale Fehler ab)
             """.trimIndent())
         } catch (e: N8nApiException) {
             System.err.println("API-Fehler: ${e.message} (Status: ${e.statusCode})")
@@ -101,12 +116,8 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
     val aiAgentId       = uuidShort()
     val ollamaChatId    = uuidShort()
     val agentToolId     = uuidShort()
-    val exportToolId    = uuidShort()
     val agentMemoryId   = uuidShort()
     val agentResponseId = uuidShort()
-    val agentRouterId   = uuidShort()
-    val agentPrepareId  = uuidShort()
-    val agentSendCsvId  = uuidShort()
 
     // Node 1: Telegram Trigger
     val triggerNode = buildJsonObject {
@@ -608,7 +619,6 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                     "Du kannst nach Belegen suchen, Zusammenfassungen erstellen und Fragen zu gespeicherten Ausgaben beantworten. " +
                     "Antworte immer auf Deutsch und sei präzise. Wenn du keine relevanten Daten findest, sage das ehrlich. " +
                     "Verwende das Tool 'search_expenses' um nach Belegen zu suchen. " +
-                    "Verwende das Tool 'export_csv' wenn der Benutzer einen CSV-Export seiner Belege möchte. Du kannst optional ein Jahr als Parameter übergeben. WICHTIG: Wenn das export_csv Tool einen Dateipfad zurückgibt, gib diesen Pfad EXAKT und UNVERÄNDERT in deiner Antwort wieder, damit die Datei automatisch gesendet werden kann. " +
                     "Wenn der Benutzer auf eine vorherige Nachricht antwortet (Reply), wird diese als '[Referenzierte Nachricht]' mitgeliefert. Beziehe dich darauf in deiner Antwort.")
             })
         })
@@ -681,65 +691,6 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         })
     }
 
-    // Node 10b2: Tool – CSV Export (Code Tool)
-    val exportToolNode = buildJsonObject {
-        put("id", exportToolId)
-        put("name", "export_csv")
-        put("type", "@n8n/n8n-nodes-langchain.toolCode")
-        put("typeVersion", 1.2)
-        put("position", buildJsonArray { add(950); add(1050) })
-        put("parameters", buildJsonObject {
-            put("name", "export_csv")
-            put("description", "Exportiert Kassenbelege als CSV-Datei. " +
-                "Input als JSON-String mit optionalen Feldern: year (z.B. '2025'), filter (Geschäftsname z.B. 'REWE'). " +
-                "Beispiel: {\"year\":\"2026\",\"filter\":\"REWE\"} oder {\"year\":\"2025\"} oder {} für alles im aktuellen Jahr. " +
-                "Gibt den Dateipfad der erzeugten CSV zurück.")
-            put("jsCode",
-                "const fs = require('fs');\n" +
-                "const path = require('path');\n" +
-                "const raw = (\$input.item.json.query || \$input.item.json.chatInput || '').trim();\n" +
-                "let params = {};\n" +
-                "try { params = JSON.parse(raw); } catch(e) {\n" +
-                "  const ym = raw.match(/\\d{4}/);\n" +
-                "  if (ym) params.year = ym[0];\n" +
-                "  if (raw && !ym) params.filter = raw;\n" +
-                "}\n" +
-                "const year = params.year || new Date().getFullYear().toString();\n" +
-                "const filterStr = (params.filter || '').toLowerCase().trim();\n" +
-                "const dir = '/home/node/.n8n/expenseTracker';\n" +
-                "const exportDir = path.join(dir, 'exports');\n" +
-                "if (!fs.existsSync(exportDir)) fs.mkdirSync(exportDir, { recursive: true });\n" +
-                "const filePath = path.join(dir, 'receipts_' + year + '.jsonl');\n" +
-                "let receipts = [];\n" +
-                "if (fs.existsSync(filePath)) {\n" +
-                "  const lines = fs.readFileSync(filePath, 'utf8').trim().split('\\n').filter(l => l);\n" +
-                "  receipts = lines.map(l => JSON.parse(l));\n" +
-                "}\n" +
-                "if (filterStr) {\n" +
-                "  receipts = receipts.filter(r => (r.senderName || '').toLowerCase().includes(filterStr));\n" +
-                "}\n" +
-                "if (receipts.length === 0) {\n" +
-                "  const what = filterStr ? filterStr + ' im Jahr ' + year : 'Jahr ' + year;\n" +
-                "  return 'Keine Belege fuer ' + what + ' vorhanden.';\n" +
-                "}\n" +
-                "const safeName = filterStr ? filterStr.replace(/[^a-z0-9]/g,'_') + '_' + year : year;\n" +
-                "const headers = ['id','createdAt','documentType','invoiceNumber','invoiceDate','senderName','senderAddress','amountNet','amountVat','amountTotal','currency','notes'];\n" +
-                "const q = String.fromCharCode(34);\n" +
-                "const csvLines = [headers.join(';')];\n" +
-                "for (const r of receipts) {\n" +
-                "  csvLines.push(headers.map(h => {\n" +
-                "    const v = r[h] ?? '';\n" +
-                "    const s = String(v).replace(new RegExp(q, 'g'), q + q);\n" +
-                "    return s.includes(';') || s.includes(q) ? q + s + q : s;\n" +
-                "  }).join(';'));\n" +
-                "}\n" +
-                "const csv = csvLines.join('\\n');\n" +
-                "const csvPath = path.join(exportDir, 'expenses_' + safeName + '.csv');\n" +
-                "fs.writeFileSync(csvPath, csv, 'utf8');\n" +
-                "return 'CSV erstellt: ' + csvPath + ' (' + receipts.length + ' Belege' + (filterStr ? ' fuer ' + filterStr : '') + ', Jahr ' + year + ')';")
-        })
-    }
-
     // Node 10c: Window Buffer Memory (per chatId)
     val agentMemoryNode = buildJsonObject {
         put("id", agentMemoryId)
@@ -754,89 +705,18 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         })
     }
 
-    // Node 10d: IF – CSV erzeugt?
-    val agentIfCsvNode = buildJsonObject {
-        put("id", agentRouterId)
-        put("name", "CSV erzeugt?")
-        put("type", "n8n-nodes-base.if")
-        put("typeVersion", 1)
-        put("position", buildJsonArray { add(1000); add(700) })
-        put("parameters", buildJsonObject {
-            put("conditions", buildJsonObject {
-                put("string", buildJsonArray {
-                    add(buildJsonObject {
-                        put("value1", "={{ \$json.output }}")
-                        put("operation", "contains")
-                        put("value2", "/expenseTracker/exports/")
-                    })
-                })
-            })
-        })
-    }
-
-    // Node 10e: CSV vorbereiten (nur bei true-Branch)
-    val agentPrepareCsvNode = buildJsonObject {
-        put("id", agentPrepareId)
-        put("name", "CSV vorbereiten")
-        put("type", "n8n-nodes-base.code")
-        put("typeVersion", 2)
-        put("position", buildJsonArray { add(1250); add(600) })
-        put("parameters", buildJsonObject {
-            put("language", "javaScript")
-            put("jsCode",
-                "const fs = require('fs');\n" +
-                "const output = \$input.first().json.output || '';\n" +
-                "const pathMatch = output.match(/(\\/home\\/[^\\s]+\\.csv)/);\n" +
-                "if (!pathMatch || !fs.existsSync(pathMatch[1])) {\n" +
-                "  return [{ json: { text: output } }];\n" +
-                "}\n" +
-                "const csvPath = pathMatch[1];\n" +
-                "const textPart = output.replace(csvPath, '').trim();\n" +
-                "const csvData = fs.readFileSync(csvPath, 'utf8');\n" +
-                "const b64 = Buffer.from(csvData, 'utf8').toString('base64');\n" +
-                "const fileName = csvPath.split('/').pop();\n" +
-                "return [{ json: { text: textPart || fileName, fileName }, binary: { data: { data: b64, mimeType: 'text/csv', fileName } } }];")
-        })
-    }
-
-    // Node 10f: Agent Antwort als Text senden (false branch)
+    // Node 10d: Agent Antwort via Telegram senden
     val agentResponseNode = buildJsonObject {
         put("id", agentResponseId)
         put("name", "Antwort: Agent")
         put("type", "n8n-nodes-base.telegram")
         put("typeVersion", 1.1)
-        put("position", buildJsonArray { add(1250); add(800) })
+        put("position", buildJsonArray { add(1000); add(700) })
         put("parameters", buildJsonObject {
             put("operation", "sendMessage")
             put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
             put("text", "={{ \$json.output }}")
             put("additionalFields", buildJsonObject {
-                put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
-                put("appendAttribution", false)
-            })
-        })
-        put("credentials", buildJsonObject {
-            put("telegramApi", buildJsonObject {
-                put("id", credentialId)
-                put("name", "Telegram Bot")
-            })
-        })
-    }
-
-    // Node 10g: Agent CSV als Datei senden (true branch)
-    val agentSendCsvNode = buildJsonObject {
-        put("id", agentSendCsvId)
-        put("name", "Agent CSV senden")
-        put("type", "n8n-nodes-base.telegram")
-        put("typeVersion", 1.1)
-        put("position", buildJsonArray { add(1500); add(600) })
-        put("parameters", buildJsonObject {
-            put("operation", "sendDocument")
-            put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
-            put("binaryData", true)
-            put("binaryPropertyName", "data")
-            put("additionalFields", buildJsonObject {
-                put("caption", "={{ \$json.text }}")
                 put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
                 put("appendAttribution", false)
             })
@@ -986,31 +866,11 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 })
             })
         })
-        // AI Agent → CSV erzeugt?
+        // AI Agent → Antwort: Agent
         put("AI Agent", buildJsonObject {
             put("main", buildJsonArray {
                 add(buildJsonArray {
-                    add(buildJsonObject { put("node", "CSV erzeugt?"); put("type", "main"); put("index", 0) })
-                })
-            })
-        })
-        // CSV erzeugt? → true: CSV vorbereiten → Agent CSV senden
-        put("CSV erzeugt?", buildJsonObject {
-            put("main", buildJsonArray {
-                // index 0 = true → CSV vorbereiten
-                add(buildJsonArray {
-                    add(buildJsonObject { put("node", "CSV vorbereiten"); put("type", "main"); put("index", 0) })
-                })
-                // index 1 = false → Text-Antwort
-                add(buildJsonArray {
                     add(buildJsonObject { put("node", "Antwort: Agent"); put("type", "main"); put("index", 0) })
-                })
-            })
-        })
-        put("CSV vorbereiten", buildJsonObject {
-            put("main", buildJsonArray {
-                add(buildJsonArray {
-                    add(buildJsonObject { put("node", "Agent CSV senden"); put("type", "main"); put("index", 0) })
                 })
             })
         })
@@ -1023,13 +883,6 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
             })
         })
         put("search_expenses", buildJsonObject {
-            put("ai_tool", buildJsonArray {
-                add(buildJsonArray {
-                    add(buildJsonObject { put("node", "AI Agent"); put("type", "ai_tool"); put("index", 0) })
-                })
-            })
-        })
-        put("export_csv", buildJsonObject {
             put("ai_tool", buildJsonArray {
                 add(buildJsonArray {
                     add(buildJsonObject { put("node", "AI Agent"); put("type", "ai_tool"); put("index", 0) })
@@ -1070,13 +923,66 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
             aiAgentNode,
             ollamaChatNode,
             agentToolNode,
-            exportToolNode,
             agentMemoryNode,
-            agentIfCsvNode,
-            agentPrepareCsvNode,
-            agentResponseNode,
-            agentSendCsvNode
+            agentResponseNode
         ),
+        connections = connections,
+        settings = buildJsonObject {
+            put("executionOrder", "v1")
+        }
+    )
+}
+
+fun buildErrorWorkflow(credentialId: String): WorkflowCreateRequest {
+    val errorTriggerId = uuidShort()
+    val telegramErrorId = uuidShort()
+
+    // Error Trigger Node
+    val errorTriggerNode = buildJsonObject {
+        put("id", errorTriggerId)
+        put("name", "Error Trigger")
+        put("type", "n8n-nodes-base.errorTrigger")
+        put("typeVersion", 1)
+        put("position", buildJsonArray { add(250); add(300) })
+        put("parameters", buildJsonObject {})
+    }
+
+    // Telegram Error Response Node
+    val telegramErrorNode = buildJsonObject {
+        put("id", telegramErrorId)
+        put("name", "Antwort: Fehler")
+        put("type", "n8n-nodes-base.telegram")
+        put("typeVersion", 1.1)
+        put("position", buildJsonArray { add(500); add(300) })
+        put("parameters", buildJsonObject {
+            put("operation", "sendMessage")
+            put("chatId", "={{ \$json.executionData?.contextData?.nodeParameters?.chatId || \$json.workflow.error.context?.nodeParameters?.chatId || 'unknown' }}")
+            put("text", "={{ '⚠️ Fehler: ' + (\$json.lastNode || 'unbekannt') + '\\n\\n' + (\$json.error?.message || \$json.workflow.error?.message || 'Ein Fehler ist aufgetreten') }}")
+            put("additionalFields", buildJsonObject {
+                put("appendAttribution", false)
+            })
+        })
+        put("credentials", buildJsonObject {
+            put("telegramApi", buildJsonObject {
+                put("id", credentialId)
+                put("name", "Telegram Bot")
+            })
+        })
+    }
+
+    val connections = buildJsonObject {
+        put("Error Trigger", buildJsonObject {
+            put("main", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Antwort: Fehler"); put("type", "main"); put("index", 0) })
+                })
+            })
+        })
+    }
+
+    return WorkflowCreateRequest(
+        name = "Expense Tracker - Error Handler",
+        nodes = listOf(errorTriggerNode, telegramErrorNode),
         connections = connections,
         settings = buildJsonObject {
             put("executionOrder", "v1")

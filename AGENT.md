@@ -115,6 +115,8 @@ volumes:
 - [x] AI Agent Integration (Ollama `Keyvan/german-text-3.1:latest`)
 - [x] Tool-Calling: `search_expenses` – durchsucht JSONL-Belege
 - [x] Window Buffer Memory – Konversations-Kontext per Chat-ID
+- [x] Steuernummer (VAT ID) in Beleg-Ausgabe ergänzt
+- [x] Reply-Kontext: Agent berücksichtigt referenzierte Nachrichten (Telegram Reply)
 
 ### ⏳ Ausstehend
 - [ ] Kategorisierung der Artikel hinzufügen
@@ -202,6 +204,7 @@ Export Kommando? → false
 - Zusammenfassungen erstellen (Gesamtausgaben, Top-Geschäfte)
 - Fragen zu gespeicherten Ausgaben beantworten
 - Konversations-Kontext über mehrere Nachrichten merken
+- **Reply-Kontext:** Antwortet der User auf eine Bot-Nachricht, wird der referenzierte Text als `[Referenzierte Nachricht]` automatisch mitgeliefert
 
 ### Export-Flow
 
@@ -332,6 +335,7 @@ cd n8n-api-client
 ```
 ALDI GmbH & Co. KG, Herten
 Kurt-Schumacher-Str. 192, 45881 Gelsenkirchen
+Steuernummer: DE127135535
 Datum: 31/01/2026
 Beleg-Nr: 0064 102 715611 0496
 
@@ -404,4 +408,4 @@ ExpenseTracker/
 
 ---
 
-**Zuletzt aktualisiert:** 2026-06-07 19:22 UTC+02:00
+**Zuletzt aktualisiert:** 2026-06-07 20:10 UTC+02:00
