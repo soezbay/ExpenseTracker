@@ -1,4 +1,4 @@
-﻿import io.github.cdimascio.dotenv.dotenv
+import io.github.cdimascio.dotenv.dotenv
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.*
 import java.util.*
@@ -755,7 +755,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 "  const year = f.replace('receipts_', '').replace('.jsonl', '');\n" +
                 "  const content = fs.readFileSync(path.join(dir, f), 'utf8').trim();\n" +
                 "  const count = content ? content.split('\\n').filter(l => l).length : 0;\n" +
-                "  return f + ' - ' + count + ' Belege';\n" +
+                "  return f.replace(/_/g, '\\\\_') + ' - ' + count + ' Belege';\n" +
                 "});\n" +
                 "return [{ json: { chatId, text: 'Gespeicherte Belege:\\n\\n' + lines.join('\\n') } }];")
         })
