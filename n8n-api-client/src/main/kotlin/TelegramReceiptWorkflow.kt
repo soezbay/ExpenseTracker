@@ -967,10 +967,14 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
             put("promptType", "define")
             put("text", "={{ (() => { const msg = \$('Telegram Trigger').item.json.message; const reply = msg.reply_to_message; let prompt = msg.text || ''; if (reply && reply.text) { prompt = '[Referenzierte Nachricht]:\\n' + reply.text + '\\n\\n[Meine Frage]:\\n' + prompt; } return prompt; })() }}")
             put("options", buildJsonObject {
+                put("maxIterations", 3)
                 put("systemMessage", "Du bist ein hilfreicher Ausgaben-Assistent. Du hilfst dem Benutzer, seine Ausgaben zu analysieren. " +
                     "Du kannst nach Belegen suchen, Zusammenfassungen erstellen und Fragen zu gespeicherten Ausgaben beantworten. " +
                     "Antworte immer auf Deutsch und sei präzise. Wenn du keine relevanten Daten findest, sage das ehrlich. " +
-                    "Verwende das Tool 'search_expenses' um nach Belegen zu suchen. " +
+                    "Verwende das Tool 'search_expenses' um nach Belegen zu suchen, aber rufe es maximal einmal pro Frage auf. " +
+                    "Gib genau EINE finale Antwort zurück. Wiederhole dich niemals und formuliere denselben Inhalt nicht mehrfach. " +
+                    "Halte deine Antwort kurz und prägnant (maximal 500 Wörter). " +
+                    "Verwende KEINE Markdown-Formatierung (kein **, *, _, `). Nutze fuer Aufzaehlungen einfach '- '. " +
                     "Wenn der Benutzer auf eine vorherige Nachricht antwortet (Reply), wird diese als '[Referenzierte Nachricht]' mitgeliefert. Beziehe dich darauf in deiner Antwort.")
             })
         })
@@ -985,7 +989,11 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         put("position", buildJsonArray { add(650); add(900) })
         put("parameters", buildJsonObject {
             put("model", agentModel)
-            put("options", buildJsonObject {})
+            put("options", buildJsonObject {
+                put("repeatPenalty", 1.3)
+                put("temperature", 0.3)
+                put("numPredict", 800)
+            })
         })
         put("credentials", buildJsonObject {
             put("ollamaApi", buildJsonObject {
@@ -1067,10 +1075,11 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         put("parameters", buildJsonObject {
             put("operation", "sendMessage")
             put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
-            put("text", "={{ \$json.output }}")
+            put("text", "={{ (() => { let t = \$json.output.replace(/\\*\\*/g, '').replace(/[*_`\\[\\]~]/g, ''); return t.length > 4000 ? t.slice(0, 4000) + '\\n\\n[...gekürzt]' : t; })() }}")
             put("additionalFields", buildJsonObject {
                 put("reply_to_message_id", "={{ parseInt(\$('Telegram Trigger').item.json.message.message_id) }}")
                 put("appendAttribution", false)
+                put("parseMode", "none")
             })
         })
         put("credentials", buildJsonObject {
