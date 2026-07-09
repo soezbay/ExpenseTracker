@@ -115,6 +115,10 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
     val aiAgentId       = uuidShort()
     val ollamaChatId    = uuidShort()
     val agentToolId     = uuidShort()
+    val statsToolId     = uuidShort()
+    val comparePeriodsToolId = uuidShort()
+    val topMerchantsToolId   = uuidShort()
+    val receiptByIdToolId    = uuidShort()
     val agentMemoryId   = uuidShort()
     val agentResponseId = uuidShort()
     val listFilesId     = uuidShort()
@@ -971,7 +975,12 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 put("systemMessage", "Du bist ein hilfreicher Ausgaben-Assistent. Du hilfst dem Benutzer, seine Ausgaben zu analysieren. " +
                     "Du kannst nach Belegen suchen, Zusammenfassungen erstellen und Fragen zu gespeicherten Ausgaben beantworten. " +
                     "Antworte immer auf Deutsch und sei präzise. Wenn du keine relevanten Daten findest, sage das ehrlich. " +
-                    "Verwende das Tool 'search_expenses' um nach Belegen zu suchen, aber rufe es maximal einmal pro Frage auf. " +
+                    "Verwende 'search_expenses' um einzelne Belege zu suchen (Geschäft, Datum, Artikel). " +
+                    "Verwende 'get_summary_stats' für Summen/Durchschnitt/Min/Max in einem Zeitraum (nie selbst rechnen!). " +
+                    "Verwende 'compare_periods' um zwei Jahre zu vergleichen. " +
+                    "Verwende 'top_merchants' für die Geschäfte mit den höchsten Ausgaben. " +
+                    "Verwende 'get_receipt_by_id' um alle Details (alle Artikel, Steuernummer) zu einem einzelnen Beleg zu bekommen, wenn du die ID aus einem vorherigen 'search_expenses'-Ergebnis kennst. " +
+                    "Rufe pro Frage maximal EIN passendes Tool auf. " +
                     "Gib genau EINE finale Antwort zurück. Wiederhole dich niemals und formuliere denselben Inhalt nicht mehrfach. " +
                     "Halte deine Antwort kurz und prägnant (maximal 500 Wörter). " +
                     "Verwende KEINE Markdown-Formatierung (kein **, *, _, `). Nutze fuer Aufzaehlungen einfach '- '. " +
@@ -1014,7 +1023,8 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
             put("name", "search_expenses")
             put("description", "Durchsucht gespeicherte Kassenbelege und Rechnungen. " +
                 "Input ist eine Suchanfrage (z.B. Geschäftsname, Monat, Jahr, Betrag). " +
-                "Gibt eine Liste passender Belege mit Datum, Geschäft, Betrag und Artikeln zurück.")
+                "Gibt eine Liste passender Belege mit ID, Datum, Geschäft, Betrag und Artikeln zurück. " +
+                "Die ID kann fuer 'get_receipt_by_id' verwendet werden um alle Details eines Belegs zu erhalten.")
             put("jsCode",
                 "const fs = require('fs');\n" +
                 "const path = require('path');\n" +
@@ -1039,6 +1049,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 "  });\n" +
                 "}\n" +
                 "const results = filtered.slice(0, 10).map(r => ({\n" +
+                "  id: r.id,\n" +
                 "  datum: r.invoiceDate || r.createdAt?.substring(0, 10) || 'unbekannt',\n" +
                 "  geschaeft: r.senderName || 'unbekannt',\n" +
                 "  betrag: r.amountTotal ? r.amountTotal.toFixed(2) + ' ' + (r.currency || 'EUR') : 'unbekannt',\n" +
@@ -1046,8 +1057,185 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 "}));\n" +
                 "const summary = 'Gefunden: ' + filtered.length + ' Belege (zeige max. 10).\\n' +\n" +
                 "  'Gesamtsumme: ' + filtered.reduce((s, r) => s + (r.amountTotal || 0), 0).toFixed(2) + ' EUR\\n\\n' +\n" +
-                "  results.map((r, i) => (i+1) + '. ' + r.datum + ' | ' + r.geschaeft + ' | ' + r.betrag + (r.artikel ? ' (' + r.artikel + ')' : '')).join('\\n');\n" +
+                "  results.map((r, i) => (i+1) + '. [' + r.id + '] ' + r.datum + ' | ' + r.geschaeft + ' | ' + r.betrag + (r.artikel ? ' (' + r.artikel + ')' : '')).join('\\n');\n" +
                 "return summary;")
+        })
+    }
+
+    // Node 10b2: Tool – Zusammenfassungs-Statistik (Code Tool)
+    val statsToolNode = buildJsonObject {
+        put("id", statsToolId)
+        put("name", "get_summary_stats")
+        put("type", "@n8n/n8n-nodes-langchain.toolCode")
+        put("typeVersion", 1.2)
+        put("position", buildJsonArray { add(850); add(1050) })
+        put("parameters", buildJsonObject {
+            put("name", "get_summary_stats")
+            put("description", "Berechnet Statistiken (Gesamtsumme, Durchschnitt, Anzahl, teuerster/guenstigster Beleg) fuer einen Zeitraum. " +
+                "Input ist optional ein Jahr (z.B. '2025') oder 'Jahr-Monat' (z.B. '2025-03'). Ohne Input wird das aktuelle Jahr verwendet.")
+            put("jsCode",
+                "const fs = require('fs');\n" +
+                "const path = require('path');\n" +
+                "const query = (\$input.item.json.query || \$input.item.json.chatInput || '').trim();\n" +
+                "const dir = '/home/node/.n8n/expenseTracker';\n" +
+                "const yearMatch = query.match(/(\\d{4})/);\n" +
+                "const monthMatch = query.match(/(\\d{4})-(\\d{2})/);\n" +
+                "const year = yearMatch ? yearMatch[1] : new Date().getFullYear().toString();\n" +
+                "const filePath = path.join(dir, 'receipts_' + year + '.jsonl');\n" +
+                "let receipts = [];\n" +
+                "if (fs.existsSync(filePath)) {\n" +
+                "  const lines = fs.readFileSync(filePath, 'utf8').trim().split('\\n').filter(l => l);\n" +
+                "  receipts = lines.map(l => JSON.parse(l));\n" +
+                "}\n" +
+                "if (monthMatch) {\n" +
+                "  const prefix = monthMatch[1] + '-' + monthMatch[2];\n" +
+                "  receipts = receipts.filter(r => (r.invoiceDate || r.createdAt || '').includes(prefix) || (r.createdAt || '').startsWith(prefix));\n" +
+                "}\n" +
+                "if (receipts.length === 0) {\n" +
+                "  return 'Keine Belege fuer ' + (monthMatch ? monthMatch[0] : year) + ' gefunden.';\n" +
+                "}\n" +
+                "const totals = receipts.map(r => r.amountTotal || 0);\n" +
+                "const sum = totals.reduce((a, b) => a + b, 0);\n" +
+                "const avg = sum / receipts.length;\n" +
+                "let maxR = receipts[0], minR = receipts[0];\n" +
+                "for (const r of receipts) {\n" +
+                "  if ((r.amountTotal || 0) > (maxR.amountTotal || 0)) maxR = r;\n" +
+                "  if ((r.amountTotal || 0) < (minR.amountTotal || 0)) minR = r;\n" +
+                "}\n" +
+                "return 'Zeitraum: ' + (monthMatch ? monthMatch[0] : year) + '\\n' +\n" +
+                "  'Anzahl Belege: ' + receipts.length + '\\n' +\n" +
+                "  'Gesamtsumme: ' + sum.toFixed(2) + ' EUR\\n' +\n" +
+                "  'Durchschnitt pro Beleg: ' + avg.toFixed(2) + ' EUR\\n' +\n" +
+                "  'Teuerster Beleg: ' + (maxR.senderName || 'unbekannt') + ' - ' + (maxR.amountTotal || 0).toFixed(2) + ' EUR\\n' +\n" +
+                "  'Guenstigster Beleg: ' + (minR.senderName || 'unbekannt') + ' - ' + (minR.amountTotal || 0).toFixed(2) + ' EUR';")
+        })
+    }
+
+    // Node 10b3: Tool – Zeitraeume vergleichen (Code Tool)
+    val comparePeriodsToolNode = buildJsonObject {
+        put("id", comparePeriodsToolId)
+        put("name", "compare_periods")
+        put("type", "@n8n/n8n-nodes-langchain.toolCode")
+        put("typeVersion", 1.2)
+        put("position", buildJsonArray { add(850); add(1200) })
+        put("parameters", buildJsonObject {
+            put("name", "compare_periods")
+            put("description", "Vergleicht die Ausgaben zwischen zwei Jahren. " +
+                "Input muss zwei 4-stellige Jahre enthalten, z.B. '2024 2025' oder '2024 vs 2025'.")
+            put("jsCode",
+                "const fs = require('fs');\n" +
+                "const path = require('path');\n" +
+                "const query = (\$input.item.json.query || \$input.item.json.chatInput || '').trim();\n" +
+                "const dir = '/home/node/.n8n/expenseTracker';\n" +
+                "const years = [...query.matchAll(/\\d{4}/g)].map(m => m[0]);\n" +
+                "if (years.length < 2) {\n" +
+                "  return 'Bitte zwei Jahre angeben, z.B. \\'2024 vs 2025\\'.';\n" +
+                "}\n" +
+                "const [yearA, yearB] = years;\n" +
+                "function loadSum(year) {\n" +
+                "  const filePath = path.join(dir, 'receipts_' + year + '.jsonl');\n" +
+                "  if (!fs.existsSync(filePath)) return { count: 0, sum: 0 };\n" +
+                "  const lines = fs.readFileSync(filePath, 'utf8').trim().split('\\n').filter(l => l);\n" +
+                "  const receipts = lines.map(l => JSON.parse(l));\n" +
+                "  return { count: receipts.length, sum: receipts.reduce((s, r) => s + (r.amountTotal || 0), 0) };\n" +
+                "}\n" +
+                "const a = loadSum(yearA);\n" +
+                "const b = loadSum(yearB);\n" +
+                "const diff = b.sum - a.sum;\n" +
+                "const pct = a.sum > 0 ? (diff / a.sum * 100) : 0;\n" +
+                "return yearA + ': ' + a.count + ' Belege, ' + a.sum.toFixed(2) + ' EUR\\n' +\n" +
+                "  yearB + ': ' + b.count + ' Belege, ' + b.sum.toFixed(2) + ' EUR\\n' +\n" +
+                "  'Differenz: ' + (diff >= 0 ? '+' : '') + diff.toFixed(2) + ' EUR (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)';")
+        })
+    }
+
+    // Node 10b4: Tool – Top-Geschaefte (Code Tool)
+    val topMerchantsToolNode = buildJsonObject {
+        put("id", topMerchantsToolId)
+        put("name", "top_merchants")
+        put("type", "@n8n/n8n-nodes-langchain.toolCode")
+        put("typeVersion", 1.2)
+        put("position", buildJsonArray { add(850); add(1350) })
+        put("parameters", buildJsonObject {
+            put("name", "top_merchants")
+            put("description", "Zeigt die Geschaefte mit den hoechsten Gesamtausgaben oder der hoechsten Anzahl an Belegen. " +
+                "Input ist optional ein Jahr (z.B. '2025'). Ohne Input wird das aktuelle Jahr verwendet.")
+            put("jsCode",
+                "const fs = require('fs');\n" +
+                "const path = require('path');\n" +
+                "const query = (\$input.item.json.query || \$input.item.json.chatInput || '').trim();\n" +
+                "const dir = '/home/node/.n8n/expenseTracker';\n" +
+                "const yearMatch = query.match(/(\\d{4})/);\n" +
+                "const year = yearMatch ? yearMatch[1] : new Date().getFullYear().toString();\n" +
+                "const filePath = path.join(dir, 'receipts_' + year + '.jsonl');\n" +
+                "let receipts = [];\n" +
+                "if (fs.existsSync(filePath)) {\n" +
+                "  const lines = fs.readFileSync(filePath, 'utf8').trim().split('\\n').filter(l => l);\n" +
+                "  receipts = lines.map(l => JSON.parse(l));\n" +
+                "}\n" +
+                "if (receipts.length === 0) {\n" +
+                "  return 'Keine Belege fuer ' + year + ' gefunden.';\n" +
+                "}\n" +
+                "const byMerchant = {};\n" +
+                "for (const r of receipts) {\n" +
+                "  const name = r.senderName || 'Unbekannt';\n" +
+                "  if (!byMerchant[name]) byMerchant[name] = { count: 0, sum: 0 };\n" +
+                "  byMerchant[name].count++;\n" +
+                "  byMerchant[name].sum += (r.amountTotal || 0);\n" +
+                "}\n" +
+                "const sorted = Object.entries(byMerchant).sort((a, b) => b[1].sum - a[1].sum).slice(0, 5);\n" +
+                "return 'Top-Geschaefte ' + year + ' (nach Gesamtausgaben):\\n' +\n" +
+                "  sorted.map(([name, s], i) => (i+1) + '. ' + name + ': ' + s.sum.toFixed(2) + ' EUR (' + s.count + 'x)').join('\\n');")
+        })
+    }
+
+    // Node 10b5: Tool – Einzelbeleg per ID abrufen (Code Tool)
+    val receiptByIdToolNode = buildJsonObject {
+        put("id", receiptByIdToolId)
+        put("name", "get_receipt_by_id")
+        put("type", "@n8n/n8n-nodes-langchain.toolCode")
+        put("typeVersion", 1.2)
+        put("position", buildJsonArray { add(850); add(1500) })
+        put("parameters", buildJsonObject {
+            put("name", "get_receipt_by_id")
+            put("description", "Gibt alle Details zu einem einzelnen Beleg zurueck (alle Artikel, Steuernummer, IBAN, Notizen). " +
+                "Input ist die ID eines Belegs, wie sie in den eckigen Klammern '[...]' der 'search_expenses' Ergebnisse steht.")
+            put("jsCode",
+                "const fs = require('fs');\n" +
+                "const path = require('path');\n" +
+                "const id = (\$input.item.json.query || \$input.item.json.chatInput || '').trim();\n" +
+                "const chatId = \$('Telegram Trigger').item.json.message.chat.id;\n" +
+                "const dir = '/home/node/.n8n/expenseTracker';\n" +
+                "if (!id) {\n" +
+                "  return 'Bitte eine Beleg-ID angeben (siehe search_expenses Ergebnisse).';\n" +
+                "}\n" +
+                "let found = null;\n" +
+                "if (fs.existsSync(dir)) {\n" +
+                "  const files = fs.readdirSync(dir).filter(f => f.startsWith('receipts_') && f.endsWith('.jsonl'));\n" +
+                "  for (const file of files) {\n" +
+                "    const lines = fs.readFileSync(path.join(dir, file), 'utf8').trim().split('\\n').filter(l => l);\n" +
+                "    for (const line of lines) {\n" +
+                "      const r = JSON.parse(line);\n" +
+                "      if (r.id === id && r.chatId === chatId) { found = r; break; }\n" +
+                "    }\n" +
+                "    if (found) break;\n" +
+                "  }\n" +
+                "}\n" +
+                "if (!found) {\n" +
+                "  return 'Kein Beleg mit ID \\'' + id + '\\' gefunden.';\n" +
+                "}\n" +
+                "const items = (found.lineItems || []).map((i, idx) => (idx+1) + '. ' + (i.description || 'unbekannt') + \n" +
+                "  (i.quantity ? ' (' + i.quantity + 'x)' : '') + (i.price ? ' - ' + i.price + ' EUR' : '')).join('\\n');\n" +
+                "return 'Beleg [' + found.id + ']\\n' +\n" +
+                "  'Geschaeft: ' + (found.senderName || 'unbekannt') + '\\n' +\n" +
+                "  'Adresse: ' + (found.senderAddress || '-') + '\\n' +\n" +
+                "  'Steuernummer: ' + (found.senderVatId || '-') + '\\n' +\n" +
+                "  'Datum: ' + (found.invoiceDate || '-') + '\\n' +\n" +
+                "  'Beleg-Nr: ' + (found.invoiceNumber || '-') + '\\n' +\n" +
+                "  'Gesamt: ' + (found.amountTotal || 0).toFixed(2) + ' ' + (found.currency || 'EUR') + '\\n' +\n" +
+                "  'MwSt: ' + (found.amountVat || 0).toFixed(2) + ' EUR\\n' +\n" +
+                "  'Notizen: ' + (found.notes || '-') + '\\n\\n' +\n" +
+                "  '--- Artikel ---\\n' + (items || 'Keine Artikel erfasst');")
         })
     }
 
@@ -1282,6 +1470,34 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 })
             })
         })
+        put("get_summary_stats", buildJsonObject {
+            put("ai_tool", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "AI Agent"); put("type", "ai_tool"); put("index", 0) })
+                })
+            })
+        })
+        put("compare_periods", buildJsonObject {
+            put("ai_tool", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "AI Agent"); put("type", "ai_tool"); put("index", 0) })
+                })
+            })
+        })
+        put("top_merchants", buildJsonObject {
+            put("ai_tool", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "AI Agent"); put("type", "ai_tool"); put("index", 0) })
+                })
+            })
+        })
+        put("get_receipt_by_id", buildJsonObject {
+            put("ai_tool", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "AI Agent"); put("type", "ai_tool"); put("index", 0) })
+                })
+            })
+        })
         put("Window Buffer Memory", buildJsonObject {
             put("ai_memory", buildJsonArray {
                 add(buildJsonArray {
@@ -1321,6 +1537,10 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
             aiAgentNode,
             ollamaChatNode,
             agentToolNode,
+            statsToolNode,
+            comparePeriodsToolNode,
+            topMerchantsToolNode,
+            receiptByIdToolNode,
             agentMemoryNode,
             agentResponseNode
         ),
