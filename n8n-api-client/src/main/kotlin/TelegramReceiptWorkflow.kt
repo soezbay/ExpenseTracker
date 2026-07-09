@@ -306,25 +306,55 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         put("id", ifReceiptId)
         put("name", "Ist Kassenbon?")
         put("type", "n8n-nodes-base.if")
-        put("typeVersion", 1)
+        put("typeVersion", 2)
         put("position", buildJsonArray { add(1500); add(300) })
         put("parameters", buildJsonObject {
             put("conditions", buildJsonObject {
-                put("string", buildJsonArray {
+                put("options", buildJsonObject {
+                    put("caseSensitive", true)
+                    put("leftValue", "")
+                    put("typeValidation", "loose")
+                })
+                put("conditions", buildJsonArray {
                     add(buildJsonObject {
-                        put("value1", "={{ \$json.response.trim() }}")
-                        put("operation", "isNotEmpty")
+                        put("id", uuidShort())
+                        put("leftValue", "={{ \$json.response ? \$json.response.trim() : '' }}")
+                        put("rightValue", "")
+                        put("operator", buildJsonObject {
+                            put("type", "string")
+                            put("operation", "notEmpty")
+                        })
+                    })
+                    add(buildJsonObject {
+                        put("id", uuidShort())
+                        put("leftValue", "={{ \$json.response ? \$json.response.trim() : '' }}")
+                        put("rightValue", "NOT_A_RECEIPT")
+                        put("operator", buildJsonObject {
+                            put("type", "string")
+                            put("operation", "notContains")
+                        })
                     })
                 })
+                put("combinator", "and")
             })
+            put("options", buildJsonObject {})
         })
     }
 
     // Node 7b: Ollama OCR – Validierung + Extraktion in einem Schritt
     val ocrPrompt = when {
-        ocrModel.startsWith("Keyvan/german-ocr") || ocrModel.startsWith("german-ocr") -> "Extrahiere die Rechnung im Bild als JSON."
-        ocrModel.startsWith("deepseek-ocr")                                   -> "Extract the text in the image."
-        else                                                                   -> "Extract the text in the image."
+        ocrModel.startsWith("Keyvan/german-ocr") || ocrModel.startsWith("german-ocr") ->
+            "Prüfe zuerst, ob das Bild einen Kassenbon oder eine Rechnung zeigt. " +
+            "Falls NICHT, antworte ausschließlich mit dem Text: NOT_A_RECEIPT (ohne weitere Zeichen). " +
+            "Falls JA, extrahiere die Rechnung im Bild als JSON."
+        ocrModel.startsWith("deepseek-ocr") ->
+            "First check if the image shows a receipt or invoice. " +
+            "If NOT, respond only with the exact text: NOT_A_RECEIPT (no other characters). " +
+            "If YES, extract the text in the image."
+        else ->
+            "First check if the image shows a receipt or invoice. " +
+            "If NOT, respond only with the exact text: NOT_A_RECEIPT (no other characters). " +
+            "If YES, extract the text in the image."
     }
     val ocrNode = buildJsonObject {
         put("id", ocrId)
