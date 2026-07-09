@@ -110,6 +110,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
     val jsonSaveId      = uuidShort()
     val commandSwitchId = uuidShort()
     val exportCsvId     = uuidShort()
+    val xlsxExportId    = uuidShort()
     val sendCsvId       = uuidShort()
     val aiAgentId       = uuidShort()
     val ollamaChatId    = uuidShort()
@@ -656,10 +657,10 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         })
     }
 
-    // Node 9a: CSV aus JSONL generieren
+    // Node 9a: Beleg-Zeilen aus JSONL laden (ein Item pro Beleg für Excel-Export)
     val exportCsvNode = buildJsonObject {
         put("id", exportCsvId)
-        put("name", "CSV Export")
+        put("name", "Beleg Zeilen")
         put("type", "n8n-nodes-base.code")
         put("typeVersion", 2)
         put("position", buildJsonArray { add(750); add(500) })
@@ -680,25 +681,14 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 "  receipts = lines.map(l => JSON.parse(l)).filter(r => r.chatId === chatId);\n" +
                 "}\n" +
                 "if (receipts.length === 0) {\n" +
-                "  const csv = 'Keine Belege fuer ' + year + ' vorhanden.';\n" +
-                "  const b64 = Buffer.from(csv, 'utf8').toString('base64');\n" +
-                "  return [{ json: { chatId, year, count: 0, fileName: 'expenses_' + year + '.csv' }, binary: { data: { data: b64, mimeType: 'text/csv', fileName: 'expenses_' + year + '.csv' } } }];\n" +
-                "}\n" +
-                "function csvEscape(val) {\n" +
-                "  const s = String(val ?? '');\n" +
-                "  if (s.includes(',') || s.includes('\"') || s.includes('\\n') || s.includes('\\r')) {\n" +
-                "    return '\"' + s.replace(/\"/g, '\"\"') + '\"';\n" +
-                "  }\n" +
-                "  return s;\n" +
+                "  return [{ json: { Hinweis: 'Keine Belege fuer ' + year + ' vorhanden.' } }];\n" +
                 "}\n" +
                 "function fmtNum(v) {\n" +
-                "  if (v === null || v === undefined) return '';\n" +
+                "  if (v === null || v === undefined) return null;\n" +
                 "  const n = parseFloat(v);\n" +
-                "  return isNaN(n) ? '' : n.toFixed(2);\n" +
+                "  return isNaN(n) ? null : Math.round(n * 100) / 100;\n" +
                 "}\n" +
-                "const headers = ['id','createdAt','documentType','invoiceNumber','invoiceDate','dueDate','senderName','senderAddress','amountNet','amountVat','amountTotal','currency','notes'];\n" +
-                "const csvLines = [headers.join(',')];\n" +
-                "for (const r of receipts) {\n" +
+                "return receipts.map(r => {\n" +
                 "  const net = parseFloat(r.amountNet);\n" +
                 "  const vat = parseFloat(r.amountVat);\n" +
                 "  let total = parseFloat(r.amountTotal);\n" +
@@ -711,7 +701,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 "    const firstLine = r.senderAddress.split(/[\\n,]/).map(l => l.trim()).filter(l => l)[0];\n" +
                 "    if (firstLine) senderName = firstLine;\n" +
                 "  }\n" +
-                "  const row = {\n" +
+                "  return { json: {\n" +
                 "    id: r.id,\n" +
                 "    createdAt: r.createdAt,\n" +
                 "    documentType: r.documentType,\n" +
@@ -725,29 +715,43 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 "    amountTotal: fmtNum(total),\n" +
                 "    currency: r.currency,\n" +
                 "    notes: r.notes\n" +
-                "  };\n" +
-                "  csvLines.push(headers.map(h => csvEscape(row[h])).join(','));\n" +
-                "}\n" +
-                "const csv = csvLines.join('\\n');\n" +
-                "const b64 = Buffer.from(csv, 'utf8').toString('base64');\n" +
-                "return [{ json: { chatId, year, count: receipts.length, fileName: 'expenses_' + year + '.csv' }, binary: { data: { data: b64, mimeType: 'text/csv', fileName: 'expenses_' + year + '.csv' } } }];")
+                "  } };\n" +
+                "});")
         })
     }
 
-    // Node 9b: CSV Datei per Telegram senden
+    // Node 9a2: Beleg-Zeilen zu Excel (.xlsx) konvertieren
+    val xlsxExportNode = buildJsonObject {
+        put("id", xlsxExportId)
+        put("name", "XLSX Export")
+        put("type", "n8n-nodes-base.spreadsheetFile")
+        put("typeVersion", 2)
+        put("position", buildJsonArray { add(1000); add(500) })
+        put("parameters", buildJsonObject {
+            put("operation", "toFile")
+            put("fileFormat", "xlsx")
+            put("binaryPropertyName", "data")
+            put("options", buildJsonObject {
+                put("fileName", "={{ 'expenses_' + ((\$('Telegram Trigger').item.json.message.text || '').trim().split(/\\s+/)[1] || new Date().getFullYear().toString()) + '.xlsx' }}")
+                put("sheetName", "Belege")
+            })
+        })
+    }
+
+    // Node 9b: Excel Datei per Telegram senden
     val sendCsvNode = buildJsonObject {
         put("id", sendCsvId)
-        put("name", "CSV senden")
+        put("name", "Excel senden")
         put("type", "n8n-nodes-base.telegram")
         put("typeVersion", 1.1)
         put("position", buildJsonArray { add(1250); add(450) })
         put("parameters", buildJsonObject {
             put("operation", "sendDocument")
-            put("chatId", "={{ \$json.chatId }}")
+            put("chatId", "={{ \$('Telegram Trigger').item.json.message.chat.id }}")
             put("binaryData", true)
             put("binaryPropertyName", "data")
             put("additionalFields", buildJsonObject {
-                put("caption", "={{ '📊 ' + \$json.count + ' Belege für ' + \$json.year }}")
+                put("caption", "={{ '📊 ' + \$('Beleg Zeilen').all().length + ' Belege für ' + ((\$('Telegram Trigger').item.json.message.text || '').trim().split(/\\s+/)[1] || new Date().getFullYear().toString()) }}")
                 put("appendAttribution", false)
             })
         })
@@ -913,7 +917,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 "  '  -> Kassenbon/Rechnung per OCR verarbeiten und speichern',\n" +
                 "  '',\n" +
                 "  '/export [Jahr]',\n" +
-                "  '  -> CSV-Export der Belege (default: aktuelles Jahr)',\n" +
+                "  '  -> Excel-Export der Belege (default: aktuelles Jahr)',\n" +
                 "  '',\n" +
                 "  '/list',\n" +
                 "  '  -> Alle gespeicherten Beleg-Dateien anzeigen',\n" +
@@ -1117,7 +1121,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 })
                 // output 1 = /export
                 add(buildJsonArray {
-                    add(buildJsonObject { put("node", "CSV Export"); put("type", "main"); put("index", 0) })
+                    add(buildJsonObject { put("node", "Beleg Zeilen"); put("type", "main"); put("index", 0) })
                 })
                 // output 2 = /list
                 add(buildJsonArray {
@@ -1137,10 +1141,17 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 })
             })
         })
-        put("CSV Export", buildJsonObject {
+        put("Beleg Zeilen", buildJsonObject {
             put("main", buildJsonArray {
                 add(buildJsonArray {
-                    add(buildJsonObject { put("node", "CSV senden"); put("type", "main"); put("index", 0) })
+                    add(buildJsonObject { put("node", "XLSX Export"); put("type", "main"); put("index", 0) })
+                })
+            })
+        })
+        put("XLSX Export", buildJsonObject {
+            put("main", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Excel senden"); put("type", "main"); put("index", 0) })
                 })
             })
         })
@@ -1289,6 +1300,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
             jsonSaveNode,
             commandSwitchNode,
             exportCsvNode,
+            xlsxExportNode,
             sendCsvNode,
             listFilesNode,
             listResponseNode,
