@@ -119,6 +119,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
     val comparePeriodsToolId = uuidShort()
     val topMerchantsToolId   = uuidShort()
     val receiptByIdToolId    = uuidShort()
+    val categoryBreakdownToolId = uuidShort()
     val agentMemoryId   = uuidShort()
     val agentResponseId = uuidShort()
     val listFilesId     = uuidShort()
@@ -491,6 +492,24 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 "  const firstLine = s.address.split(/[\\n,]/).map(l => l.trim()).filter(l => l)[0];\n" +
                 "  if (firstLine) senderName = firstLine;\n" +
                 "}\n" +
+                "const CATEGORY_RULES = [\n" +
+                "  ['Lebensmittel', ['rewe', 'edeka', 'aldi', 'lidl', 'netto', 'kaufland', 'penny', 'real', 'marktkauf', 'norma', 'famila', 'combi', 'supermarkt', 'bio company']],\n" +
+                "  ['Restaurant', ['restaurant', 'pizzeria', 'imbiss', 'cafe', 'café', 'bäckerei', 'baeckerei', 'mcdonald', 'burger king', 'kfc', 'subway', 'döner', 'doener']],\n" +
+                "  ['Transport', ['tankstelle', 'aral', 'shell', 'esso', 'total', 'bft', 'db bahn', 'deutsche bahn', 'flixbus', 'uber', 'taxi', 'parkhaus', 'parken', 'bvg', 'vrr', 'vvo']],\n" +
+                "  ['Gesundheit', ['apotheke', 'arzt', 'praxis', 'zahnarzt', 'krankenhaus', 'dm-drogerie', 'rossmann', 'physio']],\n" +
+                "  ['Elektronik', ['media markt', 'mediamarkt', 'saturn', 'expert', 'euronics', 'amazon', 'conrad']],\n" +
+                "  ['Kleidung', ['h&m', 'zara', 'c&a', 'primark', 'esprit', 'zalando', 'about you', 'deichmann']],\n" +
+                "  ['Freizeit', ['kino', 'cinema', 'fitness', 'gym', 'schwimmbad', 'therme', 'museum', 'theater']],\n" +
+                "  ['Haushalt', ['ikea', 'obi', 'hornbach', 'bauhaus', 'toom', 'poco', 'roller']]\n" +
+                "];\n" +
+                "function guessCategory(name, itemDescriptions) {\n" +
+                "  const text = (name + ' ' + itemDescriptions.join(' ')).toLowerCase();\n" +
+                "  for (const [category, keywords] of CATEGORY_RULES) {\n" +
+                "    if (keywords.some(kw => text.includes(kw))) return category;\n" +
+                "  }\n" +
+                "  return 'Sonstiges';\n" +
+                "}\n" +
+                "const category = guessCategory(senderName, items.map(it => it.description || ''));\n" +
                 "const receipt = {\n" +
                 "  id: meta.receiptId,\n" +
                 "  chatId: meta.chatId,\n" +
@@ -498,6 +517,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 "  createdAt: new Date().toISOString(),\n" +
                 "  imagePath,\n" +
                 "  documentType: data.documenttype || data.document_type || '',\n" +
+                "  category,\n" +
                 "  language: data.language || '',\n" +
                 "  invoiceNumber: data.invoicenumber || data.invoice_number || '',\n" +
                 "  invoiceDate: data.invoicedate || data.invoice_date || '',\n" +
@@ -980,6 +1000,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                     "Verwende 'compare_periods' um zwei Jahre zu vergleichen. " +
                     "Verwende 'top_merchants' für die Geschäfte mit den höchsten Ausgaben. " +
                     "Verwende 'get_receipt_by_id' um alle Details (alle Artikel, Steuernummer) zu einem einzelnen Beleg zu bekommen, wenn du die ID aus einem vorherigen 'search_expenses'-Ergebnis kennst. " +
+                    "Verwende 'category_breakdown' für Fragen zu Ausgaben-Kategorien (z.B. Lebensmittel, Transport, Restaurant). " +
                     "Rufe pro Frage maximal EIN passendes Tool auf. " +
                     "Gib genau EINE finale Antwort zurück. Wiederhole dich niemals und formuliere denselben Inhalt nicht mehrfach. " +
                     "Halte deine Antwort kurz und prägnant (maximal 500 Wörter). " +
@@ -1236,6 +1257,47 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 "  'MwSt: ' + (found.amountVat || 0).toFixed(2) + ' EUR\\n' +\n" +
                 "  'Notizen: ' + (found.notes || '-') + '\\n\\n' +\n" +
                 "  '--- Artikel ---\\n' + (items || 'Keine Artikel erfasst');")
+        })
+    }
+
+    // Node 10b6: Tool – Ausgaben nach Kategorie (Code Tool)
+    val categoryBreakdownToolNode = buildJsonObject {
+        put("id", categoryBreakdownToolId)
+        put("name", "category_breakdown")
+        put("type", "@n8n/n8n-nodes-langchain.toolCode")
+        put("typeVersion", 1.2)
+        put("position", buildJsonArray { add(850); add(1650) })
+        put("parameters", buildJsonObject {
+            put("name", "category_breakdown")
+            put("description", "Schluesselt die Ausgaben eines Jahres nach Kategorie auf (z.B. Lebensmittel, Transport, Restaurant, Gesundheit, Elektronik, Kleidung, Freizeit, Haushalt, Sonstiges). " +
+                "Input ist optional ein Jahr (z.B. '2025'). Ohne Input wird das aktuelle Jahr verwendet.")
+            put("jsCode",
+                "const fs = require('fs');\n" +
+                "const path = require('path');\n" +
+                "const query = (\$input.item.json.query || \$input.item.json.chatInput || '').trim();\n" +
+                "const dir = '/home/node/.n8n/expenseTracker';\n" +
+                "const yearMatch = query.match(/(\\d{4})/);\n" +
+                "const year = yearMatch ? yearMatch[1] : new Date().getFullYear().toString();\n" +
+                "const filePath = path.join(dir, 'receipts_' + year + '.jsonl');\n" +
+                "let receipts = [];\n" +
+                "if (fs.existsSync(filePath)) {\n" +
+                "  const lines = fs.readFileSync(filePath, 'utf8').trim().split('\\n').filter(l => l);\n" +
+                "  receipts = lines.map(l => JSON.parse(l));\n" +
+                "}\n" +
+                "if (receipts.length === 0) {\n" +
+                "  return 'Keine Belege fuer ' + year + ' gefunden.';\n" +
+                "}\n" +
+                "const byCategory = {};\n" +
+                "for (const r of receipts) {\n" +
+                "  const cat = r.category || 'Sonstiges';\n" +
+                "  if (!byCategory[cat]) byCategory[cat] = { count: 0, sum: 0 };\n" +
+                "  byCategory[cat].count++;\n" +
+                "  byCategory[cat].sum += (r.amountTotal || 0);\n" +
+                "}\n" +
+                "const total = receipts.reduce((s, r) => s + (r.amountTotal || 0), 0);\n" +
+                "const sorted = Object.entries(byCategory).sort((a, b) => b[1].sum - a[1].sum);\n" +
+                "return 'Ausgaben nach Kategorie ' + year + ' (Gesamt: ' + total.toFixed(2) + ' EUR):\\n' +\n" +
+                "  sorted.map(([cat, s]) => cat + ': ' + s.sum.toFixed(2) + ' EUR (' + s.count + 'x, ' + (total > 0 ? (s.sum / total * 100).toFixed(1) : '0') + '%)').join('\\n');")
         })
     }
 
@@ -1498,6 +1560,13 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 })
             })
         })
+        put("category_breakdown", buildJsonObject {
+            put("ai_tool", buildJsonArray {
+                add(buildJsonArray {
+                    add(buildJsonObject { put("node", "AI Agent"); put("type", "ai_tool"); put("index", 0) })
+                })
+            })
+        })
         put("Window Buffer Memory", buildJsonObject {
             put("ai_memory", buildJsonArray {
                 add(buildJsonArray {
@@ -1541,6 +1610,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
             comparePeriodsToolNode,
             topMerchantsToolNode,
             receiptByIdToolNode,
+            categoryBreakdownToolNode,
             agentMemoryNode,
             agentResponseNode
         ),
