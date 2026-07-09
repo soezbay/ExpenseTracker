@@ -111,16 +111,19 @@ volumes:
 - [x] `.env` Datei mit Credentials (gitignore)
 - [x] Bilder lokal mit eindeutigem Dateinamen speichern (`fs.writeFileSync`)
 - [x] Persistenz via JSONL (append-only, multi-user-sicher)
-- [x] `/export` Kommando – CSV-Export per Telegram Chat
+- [x] `/export` Kommando – Excel-Export (.xlsx) per Telegram Chat
 - [x] AI Agent Integration (Ollama `Keyvan/german-text-3.1:latest`)
 - [x] Tool-Calling: `search_expenses` – durchsucht JSONL-Belege
 - [x] Window Buffer Memory – Konversations-Kontext per Chat-ID
 - [x] Steuernummer (VAT ID) in Beleg-Ausgabe ergänzt
 - [x] Reply-Kontext: Agent berücksichtigt referenzierte Nachrichten (Telegram Reply)
-- [x] `/list` Kommando – Gespeicherte JSONL-Dateien auflisten
+- [x] `/list` Kommando – Gespeicherte JSONL-Dateien auflisten (inkl. Dateinamen)
 - [x] `/delete` Kommando – JSONL-Dateien löschen mit Bestätigung
-- [x] CSV Export Fixes – Komma-Trennung, korrektes Quoting, amountTotal/senderName Berechnung
-- [x] Switch Node Refactoring – Einzelner Node statt verketteter IF-Branches
+- [x] `/help` Kommando – Übersicht aller verfügbaren Befehle
+- [x] Switch Node Refactoring – Einzelner Node statt verketteter IF-Branches (v3-Schema mit Fallback-Output)
+- [x] IF Node "Ist Kassenbon?" auf v2-Schema migriert (Legacy-Schema erkannte valide Belege nicht)
+- [x] Kassenbon-Validierung – expliziter `NOT_A_RECEIPT` Prompt-Fallback gegen Modell-Halluzination
+- [x] CSV-Export durch nativen Excel-Export (Spreadsheet File Node) ersetzt
 
 ### ⏳ Ausstehend
 - [ ] Kategorisierung der Artikel hinzufügen
@@ -167,19 +170,21 @@ OLLAMA_AGENT_MODEL=Keyvan/german-text-3.1:latest
 Telegram Trigger
     |
 [Nachricht Switch]
-    | Foto    | /export   | /list    | /delete   | default
-    |         |           |          |           |
-    |    CSV Export  Dateien      Dateien    AI Agent
-    |         |      auflisten    loeschen       |
-    |    CSV senden     |            |      Antwort: Agent
-    |                   |            |
+    | Foto    | /export     | /list    | /delete   | /help    | default
+    |         |             |          |           |          |
+    |    Beleg Zeilen  Dateien      Dateien    Hilfe      AI Agent
+    |         |        auflisten    loeschen   generieren     |
+    |    XLSX Export      |            |          |      Antwort: Agent
+    |         |           |            |          |
+    |    Excel senden  Antwort: Liste  Antwort: Geloescht  Antwort: Hilfe
+    |
 Antwort: "Validating photo.."
     |
 Telegram getFile → Bild herunterladen → Zu Base64
     |
 Ollama OCR (Validation + Extraction)
     |
-[Ist Kassenbon?]
+[Ist Kassenbon?] (notEmpty AND notContains 'NOT_A_RECEIPT')
     | Ja                                      | Nein
     |                                    Antwort: Kein Kassenbon
 Format OCR + Restore Binary (parallel)
@@ -211,16 +216,14 @@ Export Kommando? → false
 
 ### Export-Flow
 
-User sendet `/export` oder `/export 2025` → Bot antwortet mit CSV-Datei.
-- Liest `receipts_YYYY.jsonl`
-- Filtert nach `chatId` des Users
-- Generiert echtes CSV (Komma-getrennt, RFC 4180 Quoting)
-- Korrigiert `amountTotal` wenn OCR `amountNet + amountVat` ignoriert hat
-- Sendet als Telegram-Dokument
+User sendet `/export` oder `/export 2025` → Bot antwortet mit Excel-Datei (`.xlsx`).
+- **Beleg Zeilen** (Code): Liest `receipts_YYYY.jsonl`, filtert nach `chatId` des Users, gibt ein Item pro Beleg zurück (echte Zahlen, `amountTotal`/`senderName` korrigiert)
+- **XLSX Export** (Spreadsheet File Node): Konvertiert die Items nativ zu `.xlsx` (Sheet "Belege")
+- **Excel senden** (Telegram): Sendet die Datei als Dokument, Caption zeigt Beleg-Anzahl
 
 ### List-Flow
 
-User sendet `/list` → Bot antwortet mit Liste aller gespeicherten `receipts_YYYY.jsonl`-Dateien und deren Beleg-Anzahl.
+User sendet `/list` → Bot antwortet mit Liste aller gespeicherten `receipts_YYYY.jsonl`-Dateien (inkl. Dateiname) und deren Beleg-Anzahl.
 
 ### Delete-Flow
 
@@ -228,18 +231,25 @@ User sendet `/delete 2026` → Bot zeigt Vorschau und verlangt Bestätigung.
 User sendet `/delete 2026 confirm` → Datei wird gelöscht.
 User sendet `/delete all` oder `/delete all confirm` für alle Dateien.
 
+### Help-Flow
+
+User sendet `/help` → Bot antwortet mit einer Übersicht aller verfügbaren Kommandos (Foto, `/export`, `/list`, `/delete`, freie Frage an den AI Agent).
+
 ### Node-Details
 
 | Node | Typ | Funktion |
 |------|-----|----------|
 | **Telegram Trigger** | Webhook | Empfängt Fotos und Textkommandos |
-| **Nachricht Switch** | Switch | Routet Nachrichten: Foto → Bildverarbeitung, /export → CSV, /list → Liste, /delete → Löschen, Default → Agent |
-| **CSV Export** | Code | Liest JSONL, filtert nach User, generiert CSV (Komma, korrektes Quoting) |
-| **CSV senden** | Telegram | Sendet CSV als Dokument |
-| **Dateien auflisten** | Code | Listet alle `receipts_YYYY.jsonl` mit Beleg-Anzahl |
+| **Nachricht Switch** | Switch (v3) | Routet Nachrichten: Foto → Bildverarbeitung, /export → Excel, /list → Liste, /delete → Löschen, /help → Hilfe, Default (Fallback-Output) → Agent |
+| **Beleg Zeilen** | Code | Liest JSONL, filtert nach User, gibt ein Item pro Beleg zurück (amountTotal/senderName korrigiert) |
+| **XLSX Export** | Spreadsheet File | Konvertiert Beleg-Items nativ zu `.xlsx` (Sheet "Belege") |
+| **Excel senden** | Telegram | Sendet `.xlsx` als Dokument |
+| **Dateien auflisten** | Code | Listet alle `receipts_YYYY.jsonl` mit Dateiname und Beleg-Anzahl |
 | **Antwort: Liste** | Telegram | Sendet Listen-Ergebnis |
 | **Dateien loeschen** | Code | Löscht JSONL-Dateien (mit `confirm` Schutz) |
 | **Antwort: Geloescht** | Telegram | Sendet Lösch-Ergebnis |
+| **Hilfe generieren** | Code | Erstellt Übersicht aller Kommandos |
+| **Antwort: Hilfe** | Telegram | Sendet Hilfe-Text |
 | **AI Agent** | LangChain Agent | Beantwortet Fragen zu Ausgaben via Ollama |
 | **Ollama Chat Model** | LLM Sub-Node | `Keyvan/german-text-3.1:latest` |
 | **search_expenses** | Tool Code | Durchsucht JSONL-Belege nach Suchbegriffen |
@@ -248,8 +258,8 @@ User sendet `/delete all` oder `/delete all confirm` für alle Dateien.
 | **Telegram getFile** | HTTP | `getFile` API → `file_path` |
 | **Bild herunterladen** | HTTP | Binary-Download via `file_path` |
 | **Zu Base64** | Code | Binary → Base64 + `chatId`, `messageId`, `receiptId` |
-| **Ollama OCR** | HTTP | POST an Ollama mit Bild + Prompt |
-| **Ist Kassenbon?** | IF | Prüft ob OCR-Response nicht leer |
+| **Ollama OCR** | HTTP | POST an Ollama mit Bild + Prompt (inkl. NOT_A_RECEIPT Anweisung) |
+| **Ist Kassenbon?** | IF (v2) | Prüft ob OCR-Response nicht leer UND nicht `NOT_A_RECEIPT` enthält |
 | **Format OCR** | Code | JSON → Telegram-lesbarer Text |
 | **Antwort: OCR Ergebnis** | Telegram | Sendet formatierten Text |
 | **Restore Binary** | Code | Holt Binary vom Download-Node zurück |
@@ -264,9 +274,11 @@ Die Prompts werden automatisch basierend auf `OLLAMA_OCR_MODEL` gewählt:
 
 | Modell-Prefix | Prompt |
 |---------------|--------|
-| `Keyvan/german-ocr` / `german-ocr` | `Extrahiere die Rechnung im Bild als JSON.` |
-| `deepseek-ocr` | `Extract the text in the image.` |
-| *(default)* | `Extract the text in the image.` |
+| `Keyvan/german-ocr` / `german-ocr` | `Prüfe zuerst, ob das Bild einen Kassenbon oder eine Rechnung zeigt. Falls NICHT, antworte ausschließlich mit dem Text: NOT_A_RECEIPT. Falls JA, extrahiere die Rechnung im Bild als JSON.` |
+| `deepseek-ocr` | `First check if the image shows a receipt or invoice. If NOT, respond only with: NOT_A_RECEIPT. If YES, extract the text in the image.` |
+| *(default)* | `First check if the image shows a receipt or invoice. If NOT, respond only with: NOT_A_RECEIPT. If YES, extract the text in the image.` |
+
+**Hinweis:** Das `NOT_A_RECEIPT`-Signal verhindert, dass Vision-Modelle für fachfremde Bilder (z.B. Katzenfotos) eine halluzinierte JSON-Struktur zurückgeben, die fälschlich als valider Kassenbon erkannt würde.
 
 ---
 
@@ -425,4 +437,4 @@ ExpenseTracker/
 
 ---
 
-**Zuletzt aktualisiert:** 2026-06-07 21:30 UTC+02:00
+**Zuletzt aktualisiert:** 2026-07-09 18:35 UTC+02:00

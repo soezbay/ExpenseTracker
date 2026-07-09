@@ -4,11 +4,12 @@ Ein Kotlin-Projekt zum Steuern von n8n über die REST API. Erstellt und deployed
 
 ## Features
 
-- **Kassenbon-OCR** – Telegram-Fotos → Ollama Vision → strukturiertes JSON → JSONL-Persistenz
+- **Kassenbon-OCR** – Telegram-Fotos → Ollama Vision → strukturiertes JSON → JSONL-Persistenz (mit expliziter Nicht-Kassenbon-Erkennung)
 - **AI Agent** – Textfragen zu Ausgaben via `Keyvan/german-text-3.1:latest` (Ollama)
-- **CSV-Export** – `/export [Jahr]` Kommando (echtes CSV mit Komma-Trennung, korrektes Quoting)
+- **Excel-Export** – `/export [Jahr]` Kommando, native `.xlsx`-Erzeugung via Spreadsheet File Node
 - **Belege verwalten** – `/list` (Dateien anzeigen) und `/delete [Jahr]` (mit Bestätigung)
-- **Workflow-Architektur** – Einzelner Switch Node für sauberes Nachrichten-Routing (Foto, /export, /list, /delete, Agent)
+- **Hilfe** – `/help` Kommando zeigt alle verfügbaren Befehle
+- **Workflow-Architektur** – Einzelner Switch Node (v3-Schema, Fallback-Output) für sauberes Nachrichten-Routing (Foto, /export, /list, /delete, /help, Agent)
 - **Auto-Credentials** – Telegram & Ollama Credentials werden automatisch in n8n erstellt
 
 ## API-Endpunkte

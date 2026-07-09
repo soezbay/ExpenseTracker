@@ -185,6 +185,60 @@ Nachricht Switch
 - Klarere Routing-Logik: Ein Node statt verketteter IF-Branches
 - Default-Output (Output 4): Alle unbekannten Textnachrichten → AI Agent
 
+## [2026-07-09] Switch/IF Node Schema-Fixes, Kassenbon-Validierung, /help & Excel-Export
+
+### Geänderte Dateien
+
+- **TelegramReceiptWorkflow.kt** – Switch Node & IF Node auf aktuelles n8n-Schema migriert, Kassenbon-Validierung korrigiert, `/help` Kommando hinzugefügt, CSV-Export durch Excel-Export ersetzt
+
+### Neuerungen im Detail
+
+#### 1. Switch Node – Schema-Fix (`typeVersion` 2 → 3)
+
+**Problem:** Nach dem Deploy blieben alle Nachrichten in der "Foto vorhanden"-Linie stecken; die Routing-Regeln waren im n8n UI leer.
+
+**Ursache:** Das verwendete JSON-Schema (`rules.rules`, `output: 0`) entsprach dem alten Switch-Node-Format. Das aktuell installierte n8n (`2.20.7`) erwartet für Switch Nodes das v3-Schema:
+
+| Alt (falsch) | Neu (korrekt) |
+|---|---|
+| `typeVersion: 2` | `typeVersion: 3` |
+| `rules.rules: [...]` | `rules.values: [...]` |
+| `output: 0` | `outputKey: "0"` |
+| kein `combinator` | `combinator: "and"` pro Regel |
+| kein Fallback | `options.fallbackOutput: "extra"` |
+
+`fallbackOutput: "extra"` ist entscheidend: Ohne diese Option bricht der Switch Node bei nicht-matchenden Nachrichten mit "Workflow success" ab, statt zum Default-Output (AI Agent) zu routen.
+
+#### 2. IF Node "Ist Kassenbon?" – Schema-Fix (`typeVersion` 1 → 2)
+
+**Problem:** Kein einziger valider Kassenbon wurde als Kassenbon erkannt – alle Fotos landeten im "Kein Kassenbon"-Zweig.
+
+**Ursache:** Der Node nutzte das Legacy-IF-Schema (`conditions.string[].value1/operation`), das vom aktuellen n8n nicht mehr korrekt eingelesen wird (`value1` wurde `undefined`, `isNotEmpty` immer `false`). Migriert auf das moderne Filter-Schema (`conditions.conditions[].leftValue/rightValue/operator`), analog zum Switch Node.
+
+#### 3. Kassenbon-Validierung – Prompt-Fix
+
+**Problem:** Auch für komplett fachfremde Bilder (z.B. ein Katzenfoto) gab das Vision-Modell eine nicht-leere JSON-Antwort zurück (Halluzination), wodurch die reine "nicht leer"-Prüfung fälschlich immer `true` ergab.
+
+**Fix:**
+- OCR-Prompt weist das Modell nun explizit an, zuerst zu prüfen ob überhaupt ein Kassenbon/Rechnung im Bild ist. Falls nicht: Antwort exakt `NOT_A_RECEIPT`.
+- IF Node prüft zusätzlich per `notContains`, dass die Antwort **nicht** `NOT_A_RECEIPT` enthält (mit `AND` verknüpft zur bisherigen `notEmpty`-Prüfung).
+
+#### 4. Neues Kommando: `/help`
+
+Zeigt eine Übersicht aller verfügbaren Kommandos (Foto senden, `/export`, `/list`, `/delete`, freie Frage an den AI Agent). Integriert als Output 4 im `Nachricht Switch` Node (Output 5 ist jetzt der Default-Fallback zum AI Agent).
+
+#### 5. Export-Format: CSV → Excel (.xlsx)
+
+**Vorher:** Code-Node baute manuell einen CSV-String (Komma-getrennt, RFC 4180 Quoting) und schickte ihn als `.csv`-Binärdatei.
+
+**Nachher:**
+```
+Beleg Zeilen (Code)  →  XLSX Export (Spreadsheet File)  →  Excel senden (Telegram)
+```
+- **Beleg Zeilen:** Liest JSONL, gibt ein Item pro Beleg zurück (echte Zahlen statt formatierter Strings)
+- **XLSX Export:** Nativer `n8n-nodes-base.spreadsheetFile` Node konvertiert die Items zu einer `.xlsx`-Datei (Sheet "Belege") – kein externes npm-Package nötig
+- **Excel senden:** Versendet die `.xlsx` per Telegram; Caption zeigt Beleg-Anzahl via `$('Beleg Zeilen').all().length`
+
 ## Nicht-committed Änderungen (Working Tree)
 
 - CSV-Pipeline komplett entfernt (8 Nodes → 3 Nodes)
@@ -192,10 +246,12 @@ Nachricht Switch
 - JSONL append-only Persistenz
 - Code-Node für Bild speichern
 - Speicherpfad auf `/home/node/.n8n/expenseTracker/` geändert
-- `/export` Kommando mit CSV-Export
-- `/list` und `/delete` Kommandos mit Bestätigung
+- `/export` Kommando mit Excel-Export (.xlsx)
+- `/list`, `/delete` und `/help` Kommandos mit Bestätigung
 - AI Agent mit Ollama, Tool-Calling und Memory
 - Reply-Kontext-Support im AI Agent
 - Steuernummer in Format OCR Ausgabe
-- CSV Export: Komma-Trennzeichen, korrektes Quoting, amountTotal/senderName Fixes
-- Switch Node statt IF-Kette für Nachrichten-Routing
+- Switch Node statt IF-Kette für Nachrichten-Routing (v3-Schema mit Fallback-Output)
+- IF Node "Ist Kassenbon?" auf v2-Schema migriert
+- Kassenbon-Validierung: expliziter NOT_A_RECEIPT Prompt-Fallback
+- CSV-Export durch nativen Excel-Export (Spreadsheet File Node) ersetzt
