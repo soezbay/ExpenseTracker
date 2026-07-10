@@ -312,55 +312,25 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         put("id", ifReceiptId)
         put("name", "Ist Kassenbon?")
         put("type", "n8n-nodes-base.if")
-        put("typeVersion", 2)
+        put("typeVersion", 1)
         put("position", buildJsonArray { add(1500); add(300) })
         put("parameters", buildJsonObject {
             put("conditions", buildJsonObject {
-                put("options", buildJsonObject {
-                    put("caseSensitive", true)
-                    put("leftValue", "")
-                    put("typeValidation", "loose")
-                })
-                put("conditions", buildJsonArray {
+                put("string", buildJsonArray {
                     add(buildJsonObject {
-                        put("id", uuidShort())
-                        put("leftValue", "={{ \$json.response ? \$json.response.trim() : '' }}")
-                        put("rightValue", "")
-                        put("operator", buildJsonObject {
-                            put("type", "string")
-                            put("operation", "notEmpty")
-                        })
-                    })
-                    add(buildJsonObject {
-                        put("id", uuidShort())
-                        put("leftValue", "={{ \$json.response ? \$json.response.trim() : '' }}")
-                        put("rightValue", "NOT_A_RECEIPT")
-                        put("operator", buildJsonObject {
-                            put("type", "string")
-                            put("operation", "notContains")
-                        })
+                        put("value1", "={{ \$json.response.trim() }}")
+                        put("operation", "isNotEmpty")
                     })
                 })
-                put("combinator", "and")
             })
-            put("options", buildJsonObject {})
         })
     }
 
     // Node 7b: Ollama OCR – Validierung + Extraktion in einem Schritt
     val ocrPrompt = when {
-        ocrModel.startsWith("Keyvan/german-ocr") || ocrModel.startsWith("german-ocr") ->
-            "Prüfe zuerst, ob das Bild einen Kassenbon oder eine Rechnung zeigt. " +
-            "Falls NICHT, antworte ausschließlich mit dem Text: NOT_A_RECEIPT (ohne weitere Zeichen). " +
-            "Falls JA, extrahiere die Rechnung im Bild als JSON."
-        ocrModel.startsWith("deepseek-ocr") ->
-            "First check if the image shows a receipt or invoice. " +
-            "If NOT, respond only with the exact text: NOT_A_RECEIPT (no other characters). " +
-            "If YES, extract the text in the image."
-        else ->
-            "First check if the image shows a receipt or invoice. " +
-            "If NOT, respond only with the exact text: NOT_A_RECEIPT (no other characters). " +
-            "If YES, extract the text in the image."
+        ocrModel.startsWith("Keyvan/german-ocr") || ocrModel.startsWith("german-ocr") -> "Extrahiere die Rechnung im Bild als JSON."
+        ocrModel.startsWith("deepseek-ocr")                                   -> "Extract the text in the image."
+        else                                                                   -> "Extract the text in the image."
     }
     val ocrNode = buildJsonObject {
         put("id", ocrId)
@@ -991,7 +961,6 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
             put("promptType", "define")
             put("text", "={{ (() => { const msg = \$('Telegram Trigger').item.json.message; const reply = msg.reply_to_message; let prompt = msg.text || ''; if (reply && reply.text) { prompt = '[Referenzierte Nachricht]:\\n' + reply.text + '\\n\\n[Meine Frage]:\\n' + prompt; } return prompt; })() }}")
             put("options", buildJsonObject {
-                put("maxIterations", 3)
                 put("systemMessage", "Du bist ein hilfreicher Ausgaben-Assistent. Du hilfst dem Benutzer, seine Ausgaben zu analysieren. " +
                     "Du kannst nach Belegen suchen, Zusammenfassungen erstellen und Fragen zu gespeicherten Ausgaben beantworten. " +
                     "Antworte immer auf Deutsch und sei präzise. Wenn du keine relevanten Daten findest, sage das ehrlich. " +
@@ -1019,11 +988,6 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         put("position", buildJsonArray { add(650); add(900) })
         put("parameters", buildJsonObject {
             put("model", agentModel)
-            put("options", buildJsonObject {
-                put("repeatPenalty", 1.3)
-                put("temperature", 0.3)
-                put("numPredict", 800)
-            })
         })
         put("credentials", buildJsonObject {
             put("ollamaApi", buildJsonObject {
