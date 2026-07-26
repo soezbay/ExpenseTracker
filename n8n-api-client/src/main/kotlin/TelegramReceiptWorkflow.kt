@@ -95,6 +95,7 @@ fun main() {
 
 fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: String, ollamaUrl: String, model: String, ocrModel: String, agentModel: String, botToken: String): WorkflowCreateRequest {
     val triggerId       = uuidShort()
+    val sendChatActionId = uuidShort()
     val validatingId    = uuidShort()
     val getFileId       = uuidShort()
     val downloadId      = uuidShort()
@@ -146,6 +147,23 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                 put("id", credentialId)
                 put("name", "Telegram Bot")
             })
+        })
+    }
+
+    // Node 1b: Telegram – Chat-Aktion "typing" sofort nach Trigger
+    val sendChatActionNode = buildJsonObject {
+        put("id", sendChatActionId)
+        put("name", "Send Chat Action")
+        put("type", "n8n-nodes-base.httpRequest")
+        put("typeVersion", 4.2)
+        put("position", buildJsonArray { add(375); add(300) })
+        put("parameters", buildJsonObject {
+            put("method", "POST")
+            put("url", "https://api.telegram.org/bot$botToken/sendChatAction")
+            put("sendBody", true)
+            put("specifyBody", "json")
+            put("jsonBody", "={{ JSON.stringify({ chat_id: \$('Telegram Trigger').item.json.message.chat.id, action: 'typing' }) }}")
+            put("options", buildJsonObject {})
         })
     }
 
@@ -541,7 +559,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                             put("conditions", buildJsonArray {
                                 add(buildJsonObject {
                                     put("id", uuidShort())
-                                    put("leftValue", "={{ \$json.message.photo ? 'yes' : '' }}")
+                                    put("leftValue", "={{ \$('Telegram Trigger').item.json.message.photo ? 'yes' : '' }}")
                                     put("rightValue", "yes")
                                     put("operator", buildJsonObject {
                                         put("type", "string")
@@ -564,7 +582,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                             put("conditions", buildJsonArray {
                                 add(buildJsonObject {
                                     put("id", uuidShort())
-                                    put("leftValue", "={{ \$json.message.text }}")
+                                    put("leftValue", "={{ \$('Telegram Trigger').item.json.message.text }}")
                                     put("rightValue", "/export")
                                     put("operator", buildJsonObject {
                                         put("type", "string")
@@ -587,7 +605,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                             put("conditions", buildJsonArray {
                                 add(buildJsonObject {
                                     put("id", uuidShort())
-                                    put("leftValue", "={{ \$json.message.text }}")
+                                    put("leftValue", "={{ \$('Telegram Trigger').item.json.message.text }}")
                                     put("rightValue", "/list")
                                     put("operator", buildJsonObject {
                                         put("type", "string")
@@ -610,7 +628,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                             put("conditions", buildJsonArray {
                                 add(buildJsonObject {
                                     put("id", uuidShort())
-                                    put("leftValue", "={{ \$json.message.text }}")
+                                    put("leftValue", "={{ \$('Telegram Trigger').item.json.message.text }}")
                                     put("rightValue", "/delete")
                                     put("operator", buildJsonObject {
                                         put("type", "string")
@@ -633,7 +651,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
                             put("conditions", buildJsonArray {
                                 add(buildJsonObject {
                                     put("id", uuidShort())
-                                    put("leftValue", "={{ \$json.message.text }}")
+                                    put("leftValue", "={{ \$('Telegram Trigger').item.json.message.text }}")
                                     put("rightValue", "/help")
                                     put("operator", buildJsonObject {
                                         put("type", "string")
@@ -1332,6 +1350,13 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         put("Telegram Trigger", buildJsonObject {
             put("main", buildJsonArray {
                 add(buildJsonArray {
+                    add(buildJsonObject { put("node", "Send Chat Action"); put("type", "main"); put("index", 0) })
+                })
+            })
+        })
+        put("Send Chat Action", buildJsonObject {
+            put("main", buildJsonArray {
+                add(buildJsonArray {
                     add(buildJsonObject { put("node", "Nachricht Switch"); put("type", "main"); put("index", 0) })
                 })
             })
@@ -1544,6 +1569,7 @@ fun buildReceiptValidationWorkflow(credentialId: String, ollamaCredentialId: Str
         name = "Expense Tracker",
         nodes = listOf(
             triggerNode,
+            sendChatActionNode,
             validatingNode,
             getFileNode,
             downloadNode,
