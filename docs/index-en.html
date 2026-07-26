@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Expense Tracker – Telegram AI Agent for Receipts</title>
+  <meta name="description" content="A Telegram bot with local OCR and AI agent for automated expense management.">
+  <style>
+    :root {
+      --bg: #f2e9dd;
+      --paper: #f7f0e4;
+      --card: #fbf5ea;
+      --accent: #b08968;
+      --accent-2: #a4785a;
+      --text: #4a3f35;
+      --muted: #8a7b6c;
+      --line: #e3d5c1;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      background-image:
+        radial-gradient(circle at 20% 20%, rgba(176,137,104,0.06), transparent 40%),
+        radial-gradient(circle at 80% 0%, rgba(176,137,104,0.08), transparent 45%),
+        repeating-linear-gradient(0deg, rgba(0,0,0,0.015) 0px, rgba(0,0,0,0.015) 1px, transparent 1px, transparent 3px);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    header {
+      padding: 4rem 1.5rem 3rem;
+      text-align: center;
+      background: radial-gradient(circle at 50% 0%, rgba(176,137,104,0.12), transparent 60%);
+    }
+    header h1 {
+      font-size: clamp(2rem, 5vw, 3rem);
+      margin: 0 0 0.5rem;
+    }
+    header p.subtitle {
+      color: var(--muted);
+      max-width: 640px;
+      margin: 0 auto 2rem;
+      font-size: 1.1rem;
+    }
+    .badges { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+    .badge {
+      background: var(--card);
+      border: 1px solid var(--line);
+      color: var(--accent-2);
+      padding: 0.4rem 0.9rem;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      box-shadow: 0 1px 2px rgba(74,63,53,0.06);
+    }
+    .cta { display: flex; gap: 1rem; justify-content: center; margin-top: 2rem; flex-wrap: wrap; }
+    .btn {
+      display: inline-block;
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .btn-primary { background: var(--accent); color: #fbf5ea; box-shadow: 0 2px 6px rgba(176,137,104,0.35); }
+    .btn-secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
+    main { max-width: 960px; margin: 0 auto; padding: 0 1.5rem 4rem; }
+    section { margin-bottom: 3rem; }
+    h2 { font-size: 1.6rem; border-left: 4px solid var(--accent); padding-left: 0.75rem; color: var(--text); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 1.25rem;
+      box-shadow: 0 1px 3px rgba(74,63,53,0.06);
+    }
+    .card h3 { margin-top: 0; font-size: 1.05rem; color: var(--accent-2); }
+    .card p { color: var(--muted); font-size: 0.92rem; margin-bottom: 0; }
+    .video-placeholder {
+      aspect-ratio: 16/9;
+      background: var(--card);
+      border: 1px dashed var(--line);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .screenshots {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+    }
+    .screenshots img {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--card);
+      box-shadow: 0 1px 3px rgba(74,63,53,0.06);
+    }
+    .screenshots figcaption {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-top: 0.4rem;
+    }
+    pre {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 1rem;
+      overflow-x: auto;
+      font-size: 0.85rem;
+      color: var(--text);
+    }
+    footer {
+      text-align: center;
+      color: var(--muted);
+      padding: 2rem 1.5rem;
+      border-top: 1px solid var(--line);
+      font-size: 0.85rem;
+    }
+    a { color: var(--accent-2); }
+    .lang-switch {
+      text-align: center;
+      margin-top: 1rem;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🧾 Expense Tracker</h1>
+    <p class="subtitle">
+      A Telegram bot that reads receipts from photos, evaluates them locally via OCR (Ollama),
+      and answers questions about your expenses with an AI agent.
+    </p>
+    <div class="badges">
+      <span class="badge">n8n</span>
+      <span class="badge">Ollama</span>
+      <span class="badge">Kotlin</span>
+      <span class="badge">Telegram Bot</span>
+      <span class="badge">Local LLMs</span>
+    </div>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/soezbay/ExpenseTracker">Code Repository ↗</a>
+      <a class="btn btn-secondary" href="#demo">View Demo</a>
+    </div>
+    <div class="lang-switch">
+      <a href="index.html">Deutsch</a> · <strong>English</strong>
+    </div>
+  </header>
+
+  <main>
+    <section id="demo">
+      <h2>Demo</h2>
+      <p>
+        The screenshots below show the complete Expense Tracker setup:
+        the n8n workflow, a real Telegram conversation with the bot,
+        and the configuration of the AI Agent.
+      </p>
+      <div class="screenshots">
+        <figure>
+          <img src="ressources/Screenshot%202026-07-10%20114051.png" alt="Expense Tracker workflow overview">
+          <figcaption>Workflow overview in n8n</figcaption>
+        </figure>
+        <figure>
+          <img src="ressources/Screenshot%202026-07-10%20114132.png" alt="Telegram bot conversation">
+          <figcaption>Telegram bot conversation</figcaption>
+        </figure>
+        <figure>
+          <img src="ressources/Screenshot%202026-07-10%20115802.png" alt="AI Agent configuration">
+          <figcaption>AI Agent configuration</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Features</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>📸 Receipt OCR</h3>
+          <p>Send a photo → the Ollama vision model automatically extracts merchant, amounts, VAT, and items.</p>
+        </div>
+        <div class="card">
+          <h3>🤖 AI Agent</h3>
+          <p>Answers natural-language questions: statistics, period comparisons, top merchants, categories.</p>
+        </div>
+        <div class="card">
+          <h3>🏷️ Categorization</h3>
+          <p>Rule-based assignment to categories like Groceries, Transport, or Restaurant.</p>
+        </div>
+        <div class="card">
+          <h3>📊 Excel Export</h3>
+          <p><code>/export [year]</code> generates a complete .xlsx file of all receipts.</p>
+        </div>
+        <div class="card">
+          <h3>🔒 Local &amp; Private</h3>
+          <p>No cloud LLM – OCR and agent run entirely on self-hosted Ollama.</p>
+        </div>
+        <div class="card">
+          <h3>⚙️ Infrastructure as Code</h3>
+          <p>The entire n8n workflow is created programmatically via a Kotlin client.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Architecture</h2>
+      <pre>Telegram Bot
+    ↓
+n8n Workflow (Trigger → OCR → Validation → Storage → AI Agent)
+    ↓
+Ollama (local LLM/Vision model)  →  OCR + AI Agent (tool calling)
+    ↓
+JSONL files (receipts_YYYY.jsonl) + images (bin/)</pre>
+    </section>
+
+    <section>
+      <h2>Quick Start</h2>
+      <pre>git clone https://github.com/soezbay/ExpenseTracker.git
+cd ExpenseTracker
+docker compose up -d
+cd n8n-api-client
+cp .env.example .env   # Add Telegram token & n8n API key
+./gradlew runTelegram</pre>
+      <p>Full instructions in the <a href="https://github.com/soezbay/ExpenseTracker#setup">README</a>.</p>
+    </section>
+  </main>
+
+  <footer>
+    Expense Tracker · <a href="https://github.com/soezbay/ExpenseTracker">GitHub Repository</a>
+  </footer>
+</body>
+</html>
