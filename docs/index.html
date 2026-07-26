@@ -88,6 +88,24 @@
       color: var(--muted);
       font-size: 0.95rem;
     }
+    .screenshots {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+    }
+    .screenshots img {
+      width: 100%;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--card);
+      box-shadow: 0 1px 3px rgba(74,63,53,0.06);
+    }
+    .screenshots figcaption {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-top: 0.4rem;
+    }
     pre {
       background: var(--paper);
       border: 1px solid var(--line);
@@ -105,6 +123,11 @@
       font-size: 0.85rem;
     }
     a { color: var(--accent-2); }
+    .lang-switch {
+      text-align: center;
+      margin-top: 1rem;
+      font-size: 0.9rem;
+    }
   </style>
 </head>
 <body>
@@ -125,13 +148,32 @@
       <a class="btn btn-primary" href="https://github.com/soezbay/ExpenseTracker">Code Repository ↗</a>
       <a class="btn btn-secondary" href="#demo">Demo ansehen</a>
     </div>
+    <div class="lang-switch">
+      <strong>Deutsch</strong> · <a href="index-en.html">English</a>
+    </div>
   </header>
 
   <main>
     <section id="demo">
       <h2>Demo</h2>
-      <div class="video-placeholder">
-        TODO: Demo-Video hier einbetten (z.B. YouTube-Embed oder &lt;video&gt;-Tag)
+      <p>
+        Die folgenden Screenshots zeigen den kompletten Expense Tracker:
+        den n8n-Workflow, eine echte Telegram-Unterhaltung mit dem Bot
+        und die Konfiguration des AI Agents.
+      </p>
+      <div class="screenshots">
+        <figure>
+          <img src="ressources/Screenshot%202026-07-10%20114051.png" alt="Übersicht des Expense Tracker Workflows">
+          <figcaption>Workflow-Übersicht in n8n</figcaption>
+        </figure>
+        <figure>
+          <img src="ressources/Screenshot%202026-07-10%20114132.png" alt="Telegram-Chat mit dem Bot">
+          <figcaption>Telegram-Unterhaltung mit dem Bot</figcaption>
+        </figure>
+        <figure>
+          <img src="ressources/Screenshot%202026-07-10%20115802.png" alt="Konfiguration des AI Agents">
+          <figcaption>Konfiguration des AI Agents</figcaption>
+        </figure>
       </div>
     </section>
 
