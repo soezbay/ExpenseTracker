@@ -239,19 +239,78 @@ Beleg Zeilen (Code)  →  XLSX Export (Spreadsheet File)  →  Excel senden (Tel
 - **XLSX Export:** Nativer `n8n-nodes-base.spreadsheetFile` Node konvertiert die Items zu einer `.xlsx`-Datei (Sheet "Belege") – kein externes npm-Package nötig
 - **Excel senden:** Versendet die `.xlsx` per Telegram; Caption zeigt Beleg-Anzahl via `$('Beleg Zeilen').all().length`
 
-## Nicht-committed Änderungen (Working Tree)
+## [2026-07-10] AI Agent Tools, Kategorisierung & Scanning-Fix
 
-- CSV-Pipeline komplett entfernt (8 Nodes → 3 Nodes)
-- SQLite-Nodes entfernt
-- JSONL append-only Persistenz
-- Code-Node für Bild speichern
-- Speicherpfad auf `/home/node/.n8n/expenseTracker/` geändert
-- `/export` Kommando mit Excel-Export (.xlsx)
-- `/list`, `/delete` und `/help` Kommandos mit Bestätigung
-- AI Agent mit Ollama, Tool-Calling und Memory
-- Reply-Kontext-Support im AI Agent
-- Steuernummer in Format OCR Ausgabe
-- Switch Node statt IF-Kette für Nachrichten-Routing (v3-Schema mit Fallback-Output)
-- IF Node "Ist Kassenbon?" auf v2-Schema migriert
-- Kassenbon-Validierung: expliziter NOT_A_RECEIPT Prompt-Fallback
-- CSV-Export durch nativen Excel-Export (Spreadsheet File Node) ersetzt
+### Geänderte Dateien
+
+- **TelegramReceiptWorkflow.kt** – neue Agent-Tools, Kategorisierung, Scanning-Fix
+
+### Neuerungen im Detail
+
+#### 1. Erweiterte Agent-Tools
+
+- `get_summary_stats` – Summe, Durchschnitt, Anzahl, teuerster/günstigster Beleg für ein Jahr oder `YYYY-MM`
+- `compare_periods` – Vergleich der Ausgaben zweier Jahre
+- `top_merchants` – Top 5 Geschäfte nach Gesamtausgaben
+- `get_receipt_by_id` – Details eines einzelnen Belegs inkl. Artikel, Steuernummer, IBAN, Notizen
+- `search_expenses` liefert jetzt Beleg-IDs zurück und filtert nach `chatId`
+
+#### 2. Agent-Antworten und Telegram Parsing
+
+- Markdown-Zeichen (`**`, `*`, `_`, `` ` ``, `[`, `]`, `~`) werden vor dem Telegram-Versand entfernt
+- `parseMode` auf `none` gesetzt → behebt `can't parse entities` 400-Fehler
+- Antworten werden auf 4000 Zeichen gekürzt
+- System-Prompt: maximal ein Tool pro Frage, genau eine finale Antwort, max. 500 Wörter, keine Wiederholungen
+
+#### 3. Kategorisierung von Belegen
+
+- Belege erhalten beim Speichern eine Kategorie per Keyword-Regeln (Groceries, Restaurant, Transport, Health, Electronics, Clothing, Leisure, Household, Other)
+- Neues Agent-Tool `category_breakdown` schlüsselt Ausgaben nach Kategorie auf
+
+#### 4. Scanning-Fix
+
+- IF-Node "Is Receipt?" (vormals "Ist Kassenbon?") zurück auf `typeVersion: 1` gesetzt
+- OCR-Prompt vereinfacht: direkte JSON-Extraktion ohne separaten `NOT_A_RECEIPT`-Check
+- Übergangsweise hinzugefügte Ollama-Sampling-Optionen (`repeatPenalty`, `temperature`, `numPredict`) und `maxIterations` aus dem Agent entfernt
+
+## [2026-07-26/27] Dokumentation, Refactoring, GitHub Pages & Demo Day
+
+### Geänderte Dateien
+
+- **TelegramReceiptWorkflow.kt** – auf modularen Builder reduziert
+- **n8n-api-client/src/main/kotlin/nodes/\*.kt** – neue modulare Node-Dateien
+- **README.md** – neues Root-README
+- **docker-compose.yml** – Compose-Stack für n8n + Ollama
+- **Documents/** – Sprint-Dokumente reorganisiert
+- **docs/index.html**, **docs/index-en.html** – GitHub Pages
+- **docs/ressources/\*.png** – neue Screenshots
+
+### Neuerungen im Detail
+
+#### 1. Refactoring der Kotlin-Workflow-Generierung
+
+- `TelegramReceiptWorkflow.kt` wurde von ~1600 Zeilen auf den Builder-Orchstrator reduziert
+- Node-Definitionen ausgelagert in:
+  - `AgentNodes.kt` (AI Agent, LLM, Memory, Tools)
+  - `CommandAndExportNodes.kt` (`/list`, `/delete`, `/help`, `/export`, Excel)
+  - `CommonNodes.kt` (Trigger, Send Chat Action, Message Switch, Credentials)
+  - `ErrorWorkflowNodes.kt` (Error Handler Workflow)
+  - `ReceiptNodes.kt` (Foto-Download, OCR, Validierung, Persistenz)
+  - `WorkflowConnections.kt` & `WorkflowIds.kt`
+- UI-Texte, Node-Namen und OCR-Ausgabe ins Englische übersetzt
+
+#### 2. Telegram "Typing"-Indikator
+
+- Neuer `Send Chat Action` HTTP-Node ruft `https://api.telegram.org/bot<token>/sendChatAction` mit `action: 'typing'` direkt nach dem Trigger auf
+- Message-Switch-Regeln referenzieren jetzt immer `$('Telegram Trigger').item.json.message` statt `$json.message`
+
+#### 3. Dokumentation, Deployment & GitHub Pages
+
+- Sprint-Dokumente in `Documents/Sprint 1`, `Documents/Sprint 2`, `Documents/Sprint 3`, `Documents/Sprint 4 Demo Day` umstrukturiert
+- Demo-Day-Unterlagen (`DEMO_DAY_PRESENTATION.md`, `Expense Tracker Demo Day.mp4`, `Expense Tacker Demo Day Submission.pdf`) hinzugefügt
+- Root `README.md` mit Architektur-Übersicht, Setup und Links hinzugefügt
+- `docker-compose.yml` für n8n + Ollama hinzugefügt
+- GitHub Pages `docs/index.html` überarbeitet
+- Neue Screenshots `n8n-workflow-screenshot.png`, `ToolsUsageExample.png`, `AnyQueastionsExample.png`, `DifferentLanguagesExample.png` hinzugefügt
+- Englische GitHub Pages Version `docs/index-en.html` hinzugefügt und verlinkt
+- Screenshot-Pfade in der Pages-Seite korrigiert
