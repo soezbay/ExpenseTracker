@@ -89,9 +89,15 @@
       font-size: 0.95rem;
     }
     .screenshots {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+      align-items: center;
+    }
+    .screenshots figure {
+      width: 100%;
+      max-width: 600px;
+      margin: 0;
     }
     .screenshots img {
       width: 100%;
@@ -154,33 +160,6 @@
   </header>
 
   <main>
-    <section id="demo">
-      <h2>Demo</h2>
-      <p>
-        The screenshots below show the complete Expense Tracker setup:
-        the n8n workflow, a real Telegram conversation with the bot,
-        and the configuration of the AI Agent.
-      </p>
-      <div class="screenshots">
-        <figure>
-          <img src="ressources/n8n-workflow-screenshot.png" alt="Expense Tracker workflow overview">
-          <figcaption>Workflow overview in n8n</figcaption>
-        </figure>
-        <figure>
-          <img src="ressources/AnyQueastionsExample.png" alt="Example of general questions to the bot">
-          <figcaption>General questions via Telegram</figcaption>
-        </figure>
-        <figure>
-          <img src="ressources/DifferentLanguagesExample.png" alt="Statistics in different languages">
-          <figcaption>Multilingual statistics</figcaption>
-        </figure>
-        <figure>
-          <img src="ressources/ToolsUsageExample.png" alt="Tool usage by the AI agent">
-          <figcaption>Tool usage: top merchants &amp; categories</figcaption>
-        </figure>
-      </div>
-    </section>
-
     <section>
       <h2>Features</h2>
       <div class="grid">
@@ -208,6 +187,33 @@
           <h3>⚙️ Infrastructure as Code</h3>
           <p>The entire n8n workflow is created programmatically via a Kotlin client.</p>
         </div>
+      </div>
+    </section>
+
+    <section id="demo">
+      <h2>Demo</h2>
+      <p>
+        The screenshots below show the complete Expense Tracker setup:
+        the n8n workflow, a real Telegram conversation with the bot,
+        and the configuration of the AI Agent.
+      </p>
+      <div class="screenshots">
+        <figure style="max-width: 900px">
+          <img src="ressources/n8n-workflow-screenshot.png" alt="Expense Tracker workflow overview">
+          <figcaption>Workflow overview in n8n</figcaption>
+        </figure>
+        <figure>
+          <img src="ressources/AnyQueastionsExample.png" alt="Example of general questions to the bot">
+          <figcaption>General questions via Telegram</figcaption>
+        </figure>
+        <figure>
+          <img src="ressources/DifferentLanguagesExample.png" alt="Statistics in different languages">
+          <figcaption>Multilingual statistics</figcaption>
+        </figure>
+        <figure>
+          <img src="ressources/ToolsUsageExample.png" alt="Tool usage by the AI agent">
+          <figcaption>Tool usage: top merchants &amp; categories</figcaption>
+        </figure>
       </div>
     </section>
 
