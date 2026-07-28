@@ -10,7 +10,9 @@ gebaut und deployed – kein manuelles Klicken im n8n-Editor, alles
 versioniert in Git.
 
 - 📺 **Projekt-Website / Live-Demo:** _TODO: GitHub Pages Link einfügen, siehe [`docs/`](./docs)_
-- 🎥 **Demo-Video:** _TODO: Link zum Screencast einfügen_
+- 🎥 **Demo-Video:**
+
+  <video src="./docs/ressources/videos/ExpenseTrackerDemo.mp4" controls width="100%"></video>
 - 📊 **Pitch Deck:** [`Documents/Pitch/Smart Expense Tracker - Safak Özbay.pdf`](./Documents/Pitch/Smart%20Expense%20Tracker%20-%20Safak%20Özbay.pdf)
 - 🗒️ **Demo Day Präsentation (Sprechnotizen):** [`Documents/Sprint 4 Demo Day/DEMO_DAY_PRESENTATION.md`](./Documents/Sprint%204%20Demo%20Day/DEMO_DAY_PRESENTATION.md)
 - 📜 **Change-History:** [`CHANGELOG.md`](./CHANGELOG.md) · [`Documents/SprintSummaries.md`](./Documents/SprintSummaries.md) · vollständige Historie via `git log`

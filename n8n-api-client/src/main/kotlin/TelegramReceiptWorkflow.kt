@@ -35,19 +35,6 @@ fun main() {
             val ollamaCredentialId = client.findOrCreateOllamaCredential(ollamaBaseUrl)
             println("✅ Ollama credential: $ollamaCredentialId")
 
-            val workflowName = "Expense Tracker"
-            println("Checking for existing workflow '$workflowName'...")
-            client.listWorkflows().find { it.name == workflowName }?.let {
-                println("Found [${it.id}]. Deleting old workflow...")
-                client.deleteWorkflow(it.id!!)
-                println("✅ Old workflow deleted.")
-            }
-
-            println("Creating new workflow...")
-            val workflow = buildReceiptValidationWorkflow(credentialId, ollamaCredentialId, ollamaUrl, ollamaModel, ocrModel, agentModel, botToken)
-            val created = client.createFullWorkflow(workflow)
-            println("✅ Workflow created: [${created.id}] ${created.name}")
-
             val errorWorkflowName = "Expense Tracker - Error Handler"
             println("Checking for existing error workflow...")
             client.listWorkflows().find { it.name == errorWorkflowName }?.let {
@@ -59,7 +46,21 @@ fun main() {
             println("Creating error workflow...")
             val errorWorkflow = buildErrorWorkflow(credentialId)
             val errorCreated = client.createFullWorkflow(errorWorkflow)
-            println("✅ Error workflow created: [${errorCreated.id}] ${errorCreated.name}")
+            val errorWorkflowId = errorCreated.id
+            println("✅ Error workflow created: [$errorWorkflowId] ${errorCreated.name}")
+
+            val workflowName = "Expense Tracker"
+            println("Checking for existing workflow '$workflowName'...")
+            client.listWorkflows().find { it.name == workflowName }?.let {
+                println("Found [${it.id}]. Deleting old workflow...")
+                client.deleteWorkflow(it.id!!)
+                println("✅ Old workflow deleted.")
+            }
+
+            println("Creating new workflow...")
+            val workflow = buildReceiptValidationWorkflow(credentialId, ollamaCredentialId, ollamaUrl, ollamaModel, ocrModel, agentModel, botToken, errorWorkflowId)
+            val created = client.createFullWorkflow(workflow)
+            println("✅ Workflow created: [${created.id}] ${created.name}")
 
             println(
                 """
@@ -91,7 +92,8 @@ fun buildReceiptValidationWorkflow(
     model: String,
     ocrModel: String,
     agentModel: String,
-    botToken: String
+    botToken: String,
+    errorWorkflowId: String? = null
 ): WorkflowCreateRequest {
     val ids = WorkflowIds()
 
@@ -135,7 +137,10 @@ fun buildReceiptValidationWorkflow(
             agentResponseNode(ids, credentialId)
         ),
         connections = buildWorkflowConnections(),
-        settings = buildJsonObject { put("executionOrder", "v1") }
+        settings = buildJsonObject {
+            put("executionOrder", "v1")
+            if (errorWorkflowId != null) put("errorWorkflow", errorWorkflowId)
+        }
     )
 }
 

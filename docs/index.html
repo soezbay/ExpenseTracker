@@ -112,6 +112,18 @@
       font-size: 0.85rem;
       margin-top: 0.4rem;
     }
+    .video-wrapper {
+      max-width: 900px;
+      margin: 0 auto 2rem;
+    }
+    .video-wrapper video {
+      width: 100%;
+      display: block;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: var(--card);
+      box-shadow: 0 1px 3px rgba(74,63,53,0.06);
+    }
     pre {
       background: var(--paper);
       border: 1px solid var(--line);
@@ -192,6 +204,12 @@
 
     <section id="demo">
       <h2>Demo</h2>
+      <div class="video-wrapper">
+        <video controls preload="none">
+          <source src="ressources/videos/ExpenseTrackerDemo.mp4" type="video/mp4">
+          Dein Browser unterstützt das Video-Tag nicht.
+        </video>
+      </div>
       <p>
         Die folgenden Screenshots zeigen den kompletten Expense Tracker:
         den n8n-Workflow, eine echte Telegram-Unterhaltung mit dem Bot

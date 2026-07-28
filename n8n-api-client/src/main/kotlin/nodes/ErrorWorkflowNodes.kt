@@ -24,8 +24,8 @@ internal fun errorResponseNode(credentialId: String) = buildJsonObject {
     put("position", buildJsonArray { add(500); add(300) })
     put("parameters", buildJsonObject {
         put("operation", "sendMessage")
-        put("chatId", "={{ \$json.executionData?.contextData?.nodeParameters?.chatId || \$json.workflow.error.context?.nodeParameters?.chatId || 'unknown' }}")
-        put("text", "={{ '⚠️ Error: ' + (\$json.lastNode || 'unknown') + '\\n\\n' + (\$json.error?.message || \$json.workflow.error?.message || 'An error occurred') }}")
+        put("chatId", "={{ \$json.execution?.error?.node?.parameters?.chatId || 'unknown' }}")
+        put("text", "={{ '⚠️ Error: ' + (\$json.execution?.error?.message || 'An error occurred') + '\\n\\nNode: ' + (\$json.execution?.lastNodeExecuted || 'unknown') + '\\nWorkflow: ' + (\$json.workflow?.name || 'unknown') }}")
         put("additionalFields", buildJsonObject { put("appendAttribution", false) })
     })
     put("credentials", telegramCredentials(credentialId))
