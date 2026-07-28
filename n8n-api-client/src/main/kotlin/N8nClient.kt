@@ -18,7 +18,8 @@ import kotlinx.serialization.json.buildJsonObject
 private data class CredentialCreateRequest(
     val name: String,
     val type: String,
-    val data: JsonObject
+    val data: JsonObject,
+    val nodesAccess: List<JsonObject> = emptyList()
 )
 
 @Serializable
@@ -113,17 +114,15 @@ class N8nClient(
 
     // --- Credentials ---
 
+    private suspend fun updateCredential(id: String, request: CredentialCreateRequest): CredentialResponse {
+        val response: HttpResponse = client.patch("${apiBase}credentials/$id") {
+            setBody(request)
+        }
+        return handleResponse(response)
+    }
+
     suspend fun findOrCreateTelegramCredential(botToken: String): String {
         val credentialName = "Telegram Bot (Auto)"
-        val listResponse: HttpResponse = client.get("${apiBase}credentials")
-        if (listResponse.status.isSuccess()) {
-            val existing = handleResponse<CredentialListResponse>(listResponse)
-                .data.find { it.name == credentialName }
-            if (existing != null) {
-                println("Vorhandenes Credential gefunden: ${existing.id}")
-                return existing.id
-            }
-        }
         val request = CredentialCreateRequest(
             name = credentialName,
             type = "telegramApi",
@@ -131,6 +130,15 @@ class N8nClient(
                 put("accessToken", JsonPrimitive(botToken))
             }
         )
+        val listResponse: HttpResponse = client.get("${apiBase}credentials")
+        if (listResponse.status.isSuccess()) {
+            val existing = handleResponse<CredentialListResponse>(listResponse)
+                .data.find { it.name == credentialName }
+            if (existing != null) {
+                println("Vorhandenes Credential gefunden: ${existing.id}, aktualisiere Token...")
+                return updateCredential(existing.id, request).id
+            }
+        }
         val response: HttpResponse = client.post("${apiBase}credentials") {
             setBody(request)
         }
