@@ -1,9 +1,9 @@
 version: '3.8'
 
-# Expense Tracker – lokaler Deployment-Stack
-# Startet n8n (Workflow-Engine) und Ollama (lokales LLM für OCR + AI Agent).
-# Der eigentliche Workflow wird anschließend über den Kotlin-Client
-# (n8n-api-client) per API in dieses n8n hochgeladen. Siehe README.md.
+# Expense Tracker – local deployment stack
+# Starts n8n (workflow engine) and Ollama (local LLM for OCR + AI agent).
+# The actual workflow is then uploaded via the Kotlin client
+# (n8n-api-client) via API to this n8n. See README.md.
 
 services:
   n8n:
@@ -16,9 +16,10 @@ services:
       - N8N_HOST=localhost
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
-      - GENERIC_TIMEZONE=Europe/Berlin
-      - TZ=Europe/Berlin
+      - WEBHOOK_URL=<your url>
       - NODE_FUNCTION_ALLOW_BUILTIN=fs,path
+      - NODE_FUNCTION_ALLOW_EXTERNAL=better-sqlite3
+      - NODE_PATH=/usr/local/lib/node_modules
     volumes:
       - n8n_data:/home/node/.n8n
       - expense_tracker_data:/home/node/.n8n/expenseTracker
@@ -37,9 +38,9 @@ services:
       - ollama_data:/root/.ollama
     networks:
       - expense-tracker-net
-    # GPU-Beschleunigung (optional, benötigt NVIDIA Container Toolkit).
-    # Falls keine GPU verfügbar ist, diesen Block entfernen – Ollama läuft
-    # dann auf CPU (langsamer, aber funktionsfähig).
+    # GPU acceleration (optional, requires NVIDIA Container Toolkit).
+    # If no GPU is available, remove this block – Ollama will then
+    # run on CPU (slower, but functional).
     deploy:
       resources:
         reservations:
@@ -49,10 +50,9 @@ services:
               capabilities: [gpu]
 
 networks:
-  expense-tracker-net:
-    driver: bridge
+  proxy-net:
+    external: true
 
 volumes:
   n8n_data:
   ollama_data:
-  expense_tracker_data:
