@@ -116,13 +116,19 @@
       max-width: 900px;
       margin: 0 auto 2rem;
     }
-    .video-wrapper video {
+    .video-wrapper video,
+    .video-wrapper iframe {
       width: 100%;
       display: block;
       border-radius: 12px;
       border: 1px solid var(--line);
       background: var(--card);
       box-shadow: 0 1px 3px rgba(74,63,53,0.06);
+    }
+    .video-wrapper iframe {
+      aspect-ratio: 16/9;
+      height: auto;
+      border: 0;
     }
     pre {
       background: var(--paper);
@@ -205,10 +211,13 @@
     <section id="demo">
       <h2>Demo</h2>
       <div class="video-wrapper">
-        <video controls preload="none">
-          <source src="ressources/videos/ExpenseTrackerDemo.mp4" type="video/mp4">
-          Your browser does not support the video tag.
-        </video>
+        <iframe
+          src="https://www.youtube.com/embed/QSYDz7L0088"
+          title="Expense Tracker Demo"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowfullscreen
+          loading="lazy">
+        </iframe>
       </div>
       <p>
         The screenshots below show the complete Expense Tracker setup:

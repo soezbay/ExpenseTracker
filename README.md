@@ -9,14 +9,13 @@ Der komplette n8n-Workflow wird **programmatisch** über einen Kotlin-Client
 gebaut und deployed – kein manuelles Klicken im n8n-Editor, alles
 versioniert in Git.
 
-- 📺 **Projekt-Website / Live-Demo:** _TODO: GitHub Pages Link einfügen, siehe [`docs/`](./docs)_
-- 🎥 **Demo-Video:**
-
-  <video src="./docs/ressources/videos/ExpenseTrackerDemo.mp4" controls width="100%"></video>
-- 📊 **Pitch Deck:** [`Documents/Pitch/Smart Expense Tracker - Safak Özbay.pdf`](./Documents/Pitch/Smart%20Expense%20Tracker%20-%20Safak%20Özbay.pdf)
-- 🗒️ **Demo Day Präsentation (Sprechnotizen):** [`Documents/Sprint 4 Demo Day/DEMO_DAY_PRESENTATION.md`](./Documents/Sprint%204%20Demo%20Day/DEMO_DAY_PRESENTATION.md)
 - 📜 **Change-History:** [`CHANGELOG.md`](./CHANGELOG.md) · [`Documents/SprintSummaries.md`](./Documents/SprintSummaries.md) · vollständige Historie via `git log`
 
+
+- 📺 **Projekt-Website:** https://soezbay.github.io/ExpenseTracker/
+- 🎥 **Demo-Video:** [youtu.be/QSYDz7L0088](https://youtu.be/QSYDz7L0088)
+
+  [![Demo-Video ansehen](https://img.youtube.com/vi/QSYDz7L0088/0.jpg)](https://youtu.be/QSYDz7L0088)
 ---
 
 ## Features
