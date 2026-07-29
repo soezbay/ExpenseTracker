@@ -9,11 +9,11 @@ Der komplette n8n-Workflow wird **programmatisch** über einen Kotlin-Client
 gebaut und deployed – kein manuelles Klicken im n8n-Editor, alles
 versioniert in Git.
 
-- 📜 **Change-History:** [`CHANGELOG.md`](./CHANGELOG.md) · [`Documents/SprintSummaries.md`](./Documents/SprintSummaries.md) · vollständige Historie via `git log`
-
 
 - 📺 **Projekt-Website:** https://soezbay.github.io/ExpenseTracker/
 - 🎥 **Demo-Video:** [youtu.be/QSYDz7L0088](https://youtu.be/QSYDz7L0088)
+- 📜 **Change-History:** [`CHANGELOG.md`](./CHANGELOG.md)
+
 
   [![Demo-Video ansehen](https://img.youtube.com/vi/QSYDz7L0088/0.jpg)](https://youtu.be/QSYDz7L0088)
 ---
@@ -147,10 +147,3 @@ ExpenseTracker/
 ├── AGENT.md                        # Technisches Setup & Status
 └── CHANGELOG.md                    # Änderungshistorie
 ```
-
-## Change History
-
-Vollständige Commit-Historie: `git log` bzw. auf GitHub unter
-[Commits](https://github.com/soezbay/ExpenseTracker/commits/main).
-Zusammenfassungen pro Sprint: [`Documents/SprintSummaries.md`](./Documents/SprintSummaries.md),
-detaillierte technische Änderungen: [`CHANGELOG.md`](./CHANGELOG.md).
