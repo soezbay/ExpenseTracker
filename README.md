@@ -9,6 +9,7 @@ The complete n8n workflow is **programmatically** built and deployed via a
 Kotlin client – no manual clicking in the n8n editor, everything is
 versioned in Git.
 
+- **Test the Bot:** https://t.me/YourLocalExpenseTrackerBot
 - 📺 **Project Website:** https://soezbay.github.io/ExpenseTracker/
 - 🎥 **Demo Video:** [youtu.be/QSYDz7L0088](https://youtu.be/QSYDz7L0088)
 - 📜 **Change History:** [`CHANGELOG.md`](./CHANGELOG.md)
